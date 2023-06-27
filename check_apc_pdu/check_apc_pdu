@@ -2,7 +2,7 @@
 
 ##
 #
-# receive status and current information from APC AP8941 PDU
+# receive status and current information from APC PDU
 #
 # you can get all snmp-options with:
 #	snmpwalk -m ALL -v 2c -c MYCOMMUNITY MYIPADDRESS  apc
@@ -10,7 +10,7 @@
 # Note that you will need to install "PowerNet-MIB.mib" in order to resolve the requests.
 #
 # Usage:
-#	./check_apc_ap8942 -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
+#	./check_apc_pdu -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK -u NUMBERUNITS
 #
 #
 # 2023-06-26:  Version 1.0	\\ Alexander Pollak
@@ -68,7 +68,7 @@ intReturn=$STATE_OK
 
 usage()
 {
-	echo "usage: ./check_apc_ap8942 -h [hostname] -c [community] -s [check] -u [units]"
+	echo "usage: ./check_apc_pdu -h [hostname] -c [community] -s [check] -u [units]"
 	echo "options:"
 	echo "	-h [snmp hostname]	Hostname"
 	echo "	-c [community name]	community name (ex: public)"
@@ -80,9 +80,9 @@ usage()
 	echo "	   load                 Check the load current against the over current thresholds "
 	echo "	-t [timeout]		duration before doing an timeout in seconds - default 10s"
 	echo ""
-	echo "examples:	./check_apc_ap8941 -h 1.2.3.4 -c public -s info"
-	echo "		./check_apc_ap8941 -h 1.2.3.4 -p 4321 -c public -s psu -t 30"
-	echo "		./check_apc_ap8941 -h 1.2.3.4 -c public -u 2 -s load"
+	echo "examples:	./check_apc_pdu -h 1.2.3.4 -c public -s info"
+	echo "		./check_apc_pdu -h 1.2.3.4 -p 4321 -c public -s psu -t 30"
+	echo "		./check_apc_pdu -h 1.2.3.4 -c public -u 2 -s load"
 	exit 3
 }
 

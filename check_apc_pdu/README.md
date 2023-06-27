@@ -1,5 +1,5 @@
-# Check APC AP8941 PDU
-Nagios script to check Power Distribution Module AP8941 from APC
+# Check APC PDU
+Nagios script to check Power Distribution Module from APC.: tested with AP8941, AP8930, AP7901B
 
 # Requirements:
 ```
@@ -17,7 +17,7 @@ change in the fourth line "#mibs" to "mibs ALL"
 ```
 # Usage:
 ```
-./check_apc_ap8941 -h [hostname] -c [community] -s [check] -u [units]
+./check_apc_pdu -h [hostname] -c [community] -s [check] -u [units]
 ```
 
 # Options:
@@ -36,15 +36,15 @@ change in the fourth line "#mibs" to "mibs ALL"
 
 # Examples:
 ```
-  ./check_apc_ap8941 -h 1.2.3.4 -c public -s info -u 1
-  ./check_apc_ap8941 -h 1.2.3.4 -p 4321 -c public -s psu -t 30 -u 1
-  ./check_apc_ap8941 -h 1.2.3.4 -c public -s load -u 2
+  ./check_apc_pdu -h 1.2.3.4 -c public -s info -u 1
+  ./check_apc_pdu -h 1.2.3.4 -p 4321 -c public -s psu -t 30 -u 1
+  ./check_apc_pdu -h 1.2.3.4 -c public -s load -u 2
 ```
 # Example Returns:
 ```
-./check_apc_ap8941 -h 1.2.3.4 -c public -s psu -u 1
+./check_apc_pdu -h 1.2.3.4 -c public -s psu -u 1
 "OK - PDU Power Supply Units: 1=OK 2=OK"
 
-./check_apc_ap8941 -h 1.2.3.4 -c public -s load -u 1
+./check_apc_pdu -h 1.2.3.4 -c public -s load -u 1
 "OK - Load current is lower then threshold: - Load=8.1A  Warning=22A  Critical=24A"
 ```
