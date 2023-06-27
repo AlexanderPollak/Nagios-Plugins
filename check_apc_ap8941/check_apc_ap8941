@@ -1,0 +1,616 @@
+#!/bin/bash
+
+##
+#
+# receive status and current information from APC AP8941 PDU
+#
+# you can get all snmp-options with:
+#	snmpwalk -m ALL -v 2c -c MYCOMMUNITY MYIPADDRESS  apc
+#
+# Note that you will need to install "PowerNet-MIB.mib" in order to resolve the requests.
+#
+# Usage:
+#	./check_apc_ap8942 -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
+#
+#
+# 2023-06-26:  Version 1.0	\\ Alexander Pollak
+#
+##
+
+
+SYSCONTACT=''
+SYSNAME=''
+SYSLOCATION=''
+
+
+SNMPVersion="2c"
+SNMPCommunity="public"
+SNMPTimeout="10"
+SNMPPort="161"
+
+# InfoList for AP8941
+MIB_IDENTNAME="rPDU2IdentName.1"
+MIB_IDENTLOCATION="rPDU2IdentLocation.1"
+MIB_IDENTCONTACT="rPDU2DeviceConfigEntry.14.1"
+
+# VarList for AP8941 dual configuration (PDU1)
+MIB_PDU1IDENTMODEL="rPDU2IdentModelNumber.1"
+MIB_PDU1IDENTSERIAL="rPDU2IdentSerialNumber.1"
+MIB_PDU1IDENTFIRM="rPDU2IdentFirmwareRev.1"
+MIB_PDU1POWERSUPPLY1STATUS="rPDU2DeviceStatusPowerSupply1Status.1"
+MIB_PDU1POWERSUPPLY2STATUS="rPDU2DeviceStatusPowerSupply2Status.1"
+MIB_PDU1NUMBEROUTLETS="rPDU2DevicePropertiesNumSwitchedOutlets.1"
+MIB_PDU1PHASECURRENT="rPDU2PhaseStatusCurrent.1"
+MIB_PDU1NEAROVERLOAD="rPDU2PhaseConfigNearOverloadCurrentThreshold.1"
+MIB_PDU1OVERLOAD="rPDU2PhaseConfigOverloadCurrentThreshold.1"
+
+# VarList for AP8941 dual configuration (PDU2)
+MIB_PDU2IDENTMODEL="rPDU2IdentModelNumber.2"
+MIB_PDU2IDENTSERIAL="rPDU2IdentSerialNumber.2"
+MIB_PDU2IDENTFIRM="rPDU2IdentFirmwareRev.2"
+MIB_PDU2POWERSUPPLY1STATUS="rPDU2DeviceStatusPowerSupply1Status.2"
+MIB_PDU2POWERSUPPLY2STATUS="rPDU2DeviceStatusPowerSupply2Status.2"
+MIB_PDU2NUMBEROUTLETS="rPDU2DevicePropertiesNumSwitchedOutlets.2"
+MIB_PDU2PHASECURRENT="rPDU2PhaseStatusCurrent.2"
+MIB_PDU2NEAROVERLOAD="rPDU2PhaseConfigNearOverloadCurrentThreshold.2"
+MIB_PDU2OVERLOAD="rPDU2PhaseConfigOverloadCurrentThreshold.2"
+
+
+
+# nagios return values
+export STATE_OK=0
+export STATE_WARNING=1
+export STATE_CRITICAL=2
+export STATE_UNKNOWN=3
+export STATE_DEPENDENT=4
+
+intReturn=$STATE_OK
+
+usage()
+{
+	echo "usage: ./check_apc_ap8942 -h [hostname] -c [community] -s [check] -u [units]"
+	echo "options:"
+	echo "	-h [snmp hostname]	Hostname"
+	echo "	-c [community name]	community name (ex: public)"
+	echo "	-p [snmp port]          port for snmp request (default: 161)"
+	echo "	-u [units]		specify number of units that are cascaded [1 or 2] (support for 2 units is implemented)"
+	echo "	-s [check]		Check to be executed"
+	echo "	   info			System infos"
+	echo "	   psu                  Check the status of both Power Supply Units in PDU"
+	echo "	   load                 Check the load current against the over current thresholds "
+	echo "	-t [timeout]		duration before doing an timeout in seconds - default 10s"
+	echo ""
+	echo "examples:	./check_apc_ap8941 -h 1.2.3.4 -c public -s info"
+	echo "		./check_apc_ap8941 -h 1.2.3.4 -p 4321 -c public -s psu -t 30"
+	echo "		./check_apc_ap8941 -h 1.2.3.4 -c public -u 2 -s load"
+	exit 3
+}
+
+if [ "$1" == "--help" ]; then
+	usage; exit 0
+fi
+
+while getopts c:h:p:u:s:t: OPTNAME; do
+	case "$OPTNAME" in
+	h)	hostname="$OPTARG";;
+	c)	SNMPCommunity="$OPTARG";;
+	p)	SNMPPort="$OPTARG";;
+	u)	nunits="$OPTARG";;
+	s)	status="$OPTARG";;
+	t)	SNMPTimeout="$OPTARG";;
+	esac
+done
+
+
+if [ "$hostname" = "" ] || [ "$SNMPCommunity" = "" ] ; then
+	usage
+else
+	SNMPArgs=" -v $SNMPVersion -c $SNMPCommunity -t $SNMPTimeout $hostname:$SNMPPort"
+
+	case "$status" in
+
+		info)
+			# Status readout for one PDU unit
+			if [ "$nunits" == "1" ] ; then
+				info=`snmpget $SNMPArgs $MIB_PDU1IDENTMODEL $MIB_PDU1IDENTSERIAL $MIB_IDENTCONTACT $MIB_IDENTNAME $MIB_IDENTLOCATION $MIB_PDU1IDENTFIRM 2> /dev/null`
+				if [ "$?" != "0" ] ; then
+					output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				else
+
+					SYSMODEL=$(echo "$info" | grep "$MIB_PDU1IDENTMODEL" | sed 's/.*"\(.*\)".*/\1/')
+					SYSSERIAL=$(echo "$info" | grep "$MIB_PDU1IDENTSERIAL" | sed 's/.*"\(.*\)".*/\1/')
+					SYSFIRM=$(echo "$info" | grep "$MIB_PDU1IDENTFIRM" | sed 's/.*"\(.*\)".*/\1/')
+					SYSCONTACT=$(echo "$info" | grep "$MIB_IDENTCONTACT" | sed 's/.*"\(.*\)".*/\1/')
+					SYSNAME=$(echo "$info" | grep "$MIB_IDENTNAME" | sed 's/.*"\(.*\)".*/\1/')
+					SYSLOCATION=$(echo "$info" | grep "$MIB_IDENTLOCATION" | sed 's/.*"\(.*\)".*/\1/')
+
+					if [ "$SYSMODEL" != "" ] ; then
+						output="\nPDU Model - $SYSMODEL\n"
+					fi
+					if [ "$SYSSERIAL" != "" ] ; then
+						output=$output"PDU Serial Number - $SYSSERIAL\n"
+					fi
+					if [ "$SYSFIRM" != "" ] ; then
+						output=$output"PDU Firmware - $SYSFIRM\n"
+					fi
+					if [ "$SYSCONTACT" != "" ] ; then
+						output=$output"Contact - $SYSCONTACT\n"
+					fi
+					if [ "$SYSNAME" != "" ] ; then
+						output=$output"Name - $SYSNAME\n"
+					fi
+					if [ "$SYSLOCATION" != "" ] ; then
+						output=$output"Location - $SYSLOCATION\n"
+					fi
+					if [ "$output" == "" ] ; then
+						output="No information returned"
+						intReturn=$STATE_WARNING
+					fi
+				fi
+			fi
+
+			# Status readout for two PDU units
+			if [ "$nunits" == "2" ] ; then
+				info=`snmpget $SNMPArgs $MIB_PDU1IDENTMODEL $MIB_PDU2IDENTMODEL $MIB_PDU1IDENTSERIAL $MIB_PDU2IDENTSERIAL $MIB_IDENTCONTACT $MIB_IDENTNAME $MIB_IDENTLOCATION $MIB_PDU1IDENTFIRM $MIB_PDU2IDENTFIRM 2> /dev/null`
+				if [ "$?" != "0" ] ; then
+					output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				else
+
+					SYS1MODEL=$(echo "$info" | grep "$MIB_PDU1IDENTMODEL" | sed 's/.*"\(.*\)".*/\1/')
+					SYS1SERIAL=$(echo "$info" | grep "$MIB_PDU1IDENTSERIAL" | sed 's/.*"\(.*\)".*/\1/')
+					SYS2MODEL=$(echo "$info" | grep "$MIB_PDU2IDENTMODEL" | sed 's/.*"\(.*\)".*/\1/')
+					SYS2SERIAL=$(echo "$info" | grep "$MIB_PDU2IDENTSERIAL" | sed 's/.*"\(.*\)".*/\1/')
+					SYS1FIRM=$(echo "$info" | grep "$MIB_PDU1IDENTFIRM" | sed 's/.*"\(.*\)".*/\1/')
+					SYS2FIRM=$(echo "$info" | grep "$MIB_PDU2IDENTFIRM" | sed 's/.*"\(.*\)".*/\1/')
+					SYSCONTACT=$(echo "$info" | grep "$MIB_IDENTCONTACT" | sed 's/.*"\(.*\)".*/\1/')
+					SYSNAME=$(echo "$info" | grep "$MIB_IDENTNAME" | sed 's/.*"\(.*\)".*/\1/')
+					SYSLOCATION=$(echo "$info" | grep "$MIB_IDENTLOCATION" | sed 's/.*"\(.*\)".*/\1/')
+
+
+					if [ "$SYS1MODEL" != "" ] ; then
+						output="\nPDU 1 Model - $SYS1MODEL\n"
+					fi
+					if [ "$SYS1SERIAL" != "" ] ; then
+						output=$output"PDU 1 Serial Number - $SYS1SERIAL\n"
+					fi
+					if [ "$SYS1FIRM" != "" ] ; then
+						output=$output"PDU 1 Firmware - $SYS1FIRM\n"
+					fi
+					if [ "$SYS2MODEL" != "" ] ; then
+						output=$output"PDU 2 Model - $SYS2MODEL\n"
+					fi
+					if [ "$SYS2SERIAL" != "" ] ; then
+						output=$output"PDU 2 Serial Number - $SYS2SERIAL\n"
+					fi
+					if [ "$SYS2FIRM" != "" ] ; then
+						output=$output"PDU 2 Firmware - $SYS2FIRM\n"
+					fi
+					if [ "$SYSCONTACT" != "" ] ; then
+						output=$output"Contact - $SYSCONTACT\n"
+					fi
+					if [ "$SYSNAME" != "" ] ; then
+						output=$output"Name - $SYSNAME\n"
+					fi
+					if [ "$SYSLOCATION" != "" ] ; then
+						output=$output"Location - $SYSLOCATION\n"
+					fi
+					if [ "$output" == "" ] ; then
+						output="No information returned"
+						intReturn=$STATE_WARNING
+					fi
+				fi
+			fi
+			# Error if wrong intput for units
+			if [ "$nunits" != "1" ]&&[ "$nunits" != "2" ] ; then
+				output="Please define number of units [1 or 2]";
+				intReturn=$STATE_UNKNOWN;
+			fi
+		;;
+
+
+
+
+		psu)
+			#rPDU2DeviceStatusPowerSupply1Status OBJECT-TYPE
+				#   SYNTAX INTEGER {
+				#      normal       (1),
+				#      alarm        (2),
+				#      notInstalled (3)
+	  # PSU readout for one PDU unit
+			if [ "$nunits" == "1" ] ; then
+				psu=`snmpget $SNMPArgs $MIB_PDU1POWERSUPPLY1STATUS $MIB_PDU1POWERSUPPLY2STATUS`
+				if [ "$?" != "0" ] ; then
+					output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				else
+
+					PDU1PSU1STATUS=$(echo "$psu" | grep "$MIB_PDU1POWERSUPPLY1STATUS" | sed 's/.*(\(.*\)).*/\1/' )
+					PDU1PSU2STATUS=$(echo "$psu" | grep "$MIB_PDU1POWERSUPPLY2STATUS" | sed 's/.*(\(.*\)).*/\1/' )
+
+
+					if [ "$PDU1PSU1STATUS" != "" ]&&[ "$PDU1PSU2STATUS" != "" ] ; then
+
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "1" ] ; then
+							output="OK - PDU Power Supply Units: 1=OK 2=OK"
+							intReturn=$STATE_OK ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "2" ] ; then
+							output="CRITICAL - PDU Power Supply Units: 1=OK 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "3" ] ; then
+							output="WARNING - PDU Power Supply Units: 1=OK 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "1" ] ; then
+							output="CRITICAL - PDU Power Supply Units: 1=Alarm 2=OK"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "2" ] ; then
+							output="CRITICAL - PDU Power Supply Units: 1=Alarm 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "3" ] ; then
+							output="CRITICAL - PDU Power Supply Units: 1=Alarm 2=Not Installed"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "1" ] ; then
+							output="WARNING - PDU Power Supply Units: 1=Not Installed 2=OK"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "2" ] ; then
+							output="CRITICAL - PDU Power Supply Units: 1=Not Installed 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "3" ] ; then
+							output="WARNING - PDU Power Supply Units: 1=Not Installed 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+					else
+						output="WARNING - No Power Supply information returned"
+						intReturn=$STATE_WARNING
+					fi
+				fi
+			fi
+
+	  		# PSU readout for two PDU units
+			if [ "$nunits" == "2" ] ; then
+				psu=`snmpget $SNMPArgs $MIB_PDU1POWERSUPPLY1STATUS $MIB_PDU1POWERSUPPLY2STATUS $MIB_PDU2POWERSUPPLY1STATUS $MIB_PDU2POWERSUPPLY2STATUS`
+				if [ "$?" != "0" ] ; then
+					output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				else
+
+					PDU1PSU1STATUS=$(echo "$psu" | grep "$MIB_PDU1POWERSUPPLY1STATUS" | sed 's/.*(\(.*\)).*/\1/' )
+					PDU1PSU2STATUS=$(echo "$psu" | grep "$MIB_PDU1POWERSUPPLY2STATUS" | sed 's/.*(\(.*\)).*/\1/' )
+					PDU2PSU1STATUS=$(echo "$psu" | grep "$MIB_PDU2POWERSUPPLY1STATUS" | sed 's/.*(\(.*\)).*/\1/' )
+					PDU2PSU2STATUS=$(echo "$psu" | grep "$MIB_PDU2POWERSUPPLY2STATUS" | sed 's/.*(\(.*\)).*/\1/' )
+
+
+					if [ "$PDU1PSU1STATUS" != "" ]&&[ "$PDU1PSU2STATUS" != "" ]&&[ "$PDU2PSU1STATUS" != "" ]&&[ "$PDU2PSU2STATUS" != "" ] ; then
+						# OK and Alarm State
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "1" ] ; then
+							output="OK - Power Supply Units: - PDU1: 1=OK 2=OK - PDU2: 1=OK 2=OK"
+							intReturn=$STATE_OK ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=OK 2=OK - PDU2: 1=OK 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=OK 2=OK - PDU2: 1=Alarm 2=OK"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=OK 2=OK - PDU2: 1=Alarm 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=OK 2=Alarm - PDU2: 1=OK 2=OK"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=OK 2=Alarm - PDU2: 1=OK 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=OK 2=Alarm - PDU2: 1=Alarm 2=OK"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=OK 2=Alarm - PDU2: 1=Alarm 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=OK - PDU2: 1=OK 2=OK"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=OK - PDU2: 1=OK 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=OK - PDU2: 1=Alarm 2=OK"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=OK - PDU2: 1=Alarm 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Alarm - PDU2: 1=OK 2=OK"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Alarm - PDU2: 1=OK 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Alarm - PDU2: 1=Alarm 2=OK"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Alarm - PDU2: 1=Alarm 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						
+						# OK and Not Installed State
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=OK 2=OK - PDU2: 1=OK 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=OK 2=OK - PDU2: 1=Not Installed 2=OK"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=OK 2=OK - PDU2: 1=Not Installed 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=OK 2=Not Installed - PDU2: 1=OK 2=OK"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=OK 2=Not Installed - PDU2: 1=OK 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=OK 2=Not Installed - PDU2: 1=Not Installed 2=OK"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "1" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=OK 2=Not Installed - PDU2: 1=Not Installed 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=Not Installed 2=OK - PDU2: 1=OK 2=OK"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=Not Installed 2=OK - PDU2: 1=OK 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=Not Installed 2=OK - PDU2: 1=Not Installed 2=OK"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "1" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=Not Installed 2=OK - PDU2: 1=Not Installed 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=Not Installed 2=Not Installed - PDU2: 1=OK 2=OK"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "1" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=Not Installed 2=Not Installed - PDU2: 1=OK 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "1" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=Not Installed 2=Not Installed - PDU2: 1=Not Installed 2=OK"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="WARNING - Power Supply Units: - PDU1: 1=Not Installed 2=Not Installed - PDU2: 1=Not Installed 2=Not Installed"
+							intReturn=$STATE_WARNING ;
+						fi
+
+						# Alarm and Not Installed State
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Alarm - PDU2: 1=Alarm 2=Not Installed"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Alarm - PDU2: 1=Not Installed 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Alarm - PDU2: 1=Not Installed 2=Not Installed"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Not Installed - PDU2: 1=Alarm 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Not Installed - PDU2: 1=Alarm 2=Not Installed"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Not Installed - PDU2: 1=Not Installed 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "2" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Alarm 2=Not Installed - PDU2: 1=Not Installed 2=Not Installed"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Not Installed 2=Alarm - PDU2: 1=Alarm 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Not Installed 2=Alarm - PDU2: 1=Alarm 2=Not Installed"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Not Installed 2=Alarm - PDU2: 1=Not Installed 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "2" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Not Installed 2=Alarm - PDU2: 1=Not Installed 2=Not Installed"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Not Installed 2=Not Installed - PDU2: 1=Alarm 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "2" ]&&[ "$PDU2PSU2STATUS" == "3" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Not Installed 2=Not Installed - PDU2: 1=Alarm 2=Not Installed"
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1PSU1STATUS" == "3" ]&&[ "$PDU1PSU2STATUS" == "3" ]&&[ "$PDU2PSU1STATUS" == "3" ]&&[ "$PDU2PSU2STATUS" == "2" ]  ; then
+							output="CRITICAL - Power Supply Units: - PDU1: 1=Not Installed 2=Not Installed - PDU2: 1=Not Installed 2=Alarm"
+							intReturn=$STATE_CRITICAL ;
+						fi
+					else
+						output="WARNING - No Power Supply information returned"
+						intReturn=$STATE_WARNING
+					fi
+				fi
+			fi
+			# Error if wrong intput for units
+			if [ $nunits != "1" ]&&[ $nunits != "2" ] ; then
+				output="Please define number of units [1 or 2]";
+				intReturn=$STATE_UNKNOWN;
+			fi
+		;;
+
+
+		# Checks the load on the PDU and compares it to the warning and critical threshold 
+		
+		#rPDU2PhaseStatusCurrent OBJECT-TYPE
+		#SYNTAX INTEGER#ACCESS read-only
+		#STATUS mandatory
+		#DESCRIPTION
+		#   "Indicates the current draw, in tenths of Amps, of the load
+		#    on the Rack PDU phase being queried"
+		load)
+			
+
+			if [ "$nunits" == "1" ] ; then
+				psu=`snmpget $SNMPArgs $MIB_PDU1PHASECURRENT $MIB_PDU1NEAROVERLOAD $MIB_PDU1OVERLOAD`
+				if [ "$?" != "0" ] ; then
+					output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				else
+
+					PDU1CURRENT=$(echo "$psu" | grep "$MIB_PDU1PHASECURRENT" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					PDU1NEAROVERLOAD=$(echo "$psu" | grep "$MIB_PDU1NEAROVERLOAD" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					PDU1OVERLOAD=$(echo "$psu" | grep "$MIB_PDU1OVERLOAD" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					
+					PDU1NEAROVERLOAD_10=$(echo $((PDU1NEAROVERLOAD * 10)))
+					PDU1OVERLOAD_10=$(echo $((PDU1OVERLOAD * 10)))
+
+					if [ "$PDU1CURRENT" != "" ]&&[ "$PDU1NEAROVERLOAD_10" != "" ]&&[ "$PDU1OVERLOAD_10" != "" ] ; then
+					
+						if [ "$PDU1CURRENT" -lt "$PDU1NEAROVERLOAD_10" ] ; then
+							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
+							output="OK - Load current is lower then threshold: - Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A "
+							intReturn=$STATE_OK ;
+						fi
+						if [ "$PDU1CURRENT" -gt "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -lt "$PDU1OVERLOAD_10" ]  ; then
+							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
+							output="WARNING - Load current is over the warning threshold: - Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A "
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1CURRENT" -gt "$PDU1OVERLOAD_10" ] ; then
+							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
+							output="CRITICAL - Load current is over the critical threshold: - Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A "
+							intReturn=$STATE_CRITICAL ;
+						fi
+					else
+						output="WARNING - No Power Supply information returned"
+						intReturn=$STATE_WARNING
+					fi
+				fi
+			fi
+
+			if [ "$nunits" == "2" ] ; then
+				psu=`snmpget $SNMPArgs $MIB_PDU1PHASECURRENT $MIB_PDU1NEAROVERLOAD $MIB_PDU1OVERLOAD $MIB_PDU2PHASECURRENT $MIB_PDU2NEAROVERLOAD $MIB_PDU2OVERLOAD`
+				if [ "$?" != "0" ] ; then
+					output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				else
+
+					PDU1CURRENT=$(echo "$psu" | grep "$MIB_PDU1PHASECURRENT" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					PDU1NEAROVERLOAD=$(echo "$psu" | grep "$MIB_PDU1NEAROVERLOAD" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					PDU1OVERLOAD=$(echo "$psu" | grep "$MIB_PDU1OVERLOAD" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					PDU2CURRENT=$(echo "$psu" | grep "$MIB_PDU2PHASECURRENT" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					PDU2NEAROVERLOAD=$(echo "$psu" | grep "$MIB_PDU2NEAROVERLOAD" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					PDU2OVERLOAD=$(echo "$psu" | grep "$MIB_PDU2OVERLOAD" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+					
+					PDU1NEAROVERLOAD_10=$(echo $((PDU1NEAROVERLOAD * 10)))
+					PDU1OVERLOAD_10=$(echo $((PDU1OVERLOAD * 10)))
+					PDU2NEAROVERLOAD_10=$(echo $((PDU2NEAROVERLOAD * 10)))
+					PDU2OVERLOAD_10=$(echo $((PDU2OVERLOAD * 10)))
+
+					if [ "$PDU1CURRENT" != "" ]&&[ "$PDU1NEAROVERLOAD_10" != "" ]&&[ "$PDU1OVERLOAD_10" != "" ]&&[ "$PDU2CURRENT" != "" ]&&[ "$PDU2NEAROVERLOAD_10" != "" ]&&[ "$PDU2OVERLOAD_10" != "" ] ; then
+					
+						if [ "$PDU1CURRENT" -lt "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU2CURRENT" -lt "$PDU2NEAROVERLOAD_10" ] ; then
+							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
+							PDU2CURRENT_DEC1=$(echo "scale=1;$PDU2CURRENT / 10" | bc)
+							output="OK - Load current is lower then threshold:  -PDU1: Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A  -PDU2: Load="$PDU2CURRENT_DEC1"A  Warning="$PDU2NEAROVERLOAD"A  Critical="$PDU2OVERLOAD"A"
+							intReturn=$STATE_OK ;
+						fi
+						if [ "$PDU1CURRENT" -gt "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -lt "$PDU1OVERLOAD_10" ]  ; then
+							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
+							output="WARNING - PDU1 Load current is over the warning threshold: - Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A "
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU2CURRENT" -gt "$PDU2NEAROVERLOAD_10" ]&&[ "$PDU2CURRENT" -lt "$PDU2OVERLOAD_10" ]  ; then
+							PDU2CURRENT_DEC1=$(echo "scale=1;$PDU2CURRENT / 10" | bc)
+							output="WARNING - PDU2 Load current is over the warning threshold: - Load="$PDU2CURRENT_DEC1"A  Warning="$PDU2NEAROVERLOAD"A  Critical="$PDU2OVERLOAD"A "
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1CURRENT" -gt "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -lt "$PDU1OVERLOAD_10" ]&&[ "$PDU2CURRENT" -gt "$PDU2NEAROVERLOAD_10" ]&&[ "$PDU2CURRENT" -lt "$PDU2OVERLOAD_10" ]  ; then
+							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
+							PDU2CURRENT_DEC1=$(echo "scale=1;$PDU2CURRENT / 10" | bc)
+							output="WARNING - PDU1 and PDU2 Load current is over the warning threshold:  -PDU1: Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A  -PDU2: Load="$PDU2CURRENT_DEC1"A  Warning="$PDU2NEAROVERLOAD"A  Critical="$PDU2OVERLOAD"A"
+							intReturn=$STATE_WARNING ;
+						fi
+						if [ "$PDU1CURRENT" -gt "$PDU1OVERLOAD_10" ] ; then
+							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
+							output="CRITICAL - PDU1 Load current is over the critical threshold: - Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A "
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU2CURRENT" -gt "$PDU2OVERLOAD_10" ] ; then
+							PDU2CURRENT_DEC1=$(echo "scale=1;$PDU2CURRENT / 10" | bc)
+							output="CRITICAL - PDU2 Load current is over the critical threshold: - Load="$PDU2CURRENT_DEC1"A  Warning="$PDU2NEAROVERLOAD"A  Critical="$PDU2OVERLOAD"A "
+							intReturn=$STATE_CRITICAL ;
+						fi
+						if [ "$PDU1CURRENT" -gt "$PDU1OVERLOAD_10" ]&&[ "$PDU2CURRENT" -gt "$PDU2OVERLOAD_10" ] ; then
+							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
+							PDU2CURRENT_DEC1=$(echo "scale=1;$PDU2CURRENT / 10" | bc)
+							output="CRITICAL - PDU1 and PDU2 Load current is over the critical threshold:  -PDU1: Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A  -PDU2: Load="$PDU2CURRENT_DEC1"A  Warning="$PDU2NEAROVERLOAD"A  Critical="$PDU2OVERLOAD"A"
+							intReturn=$STATE_CRITICAL ;
+						fi
+					else
+						output="WARNING - No Power Supply information returned"
+						intReturn=$STATE_WARNING
+					fi
+				fi
+			fi
+			# Error if wrong intput for units
+			if [ $nunits != "1" ]&&[ $nunits != "2" ] ; then
+				output="Please define number of units [1 or 2]";
+				intReturn=$STATE_UNKNOWN;
+			fi
+		;;
+	esac
+
+	echo -e $output
+	exit $intReturn
+fi
