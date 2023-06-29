@@ -1,0 +1,496 @@
+#!/bin/bash
+
+##
+#
+# receive status and current information from Mitsubishi UPS UP9933A
+#
+# you can get all snmp-options with:
+#	snmpwalk -m ALL -v 2c -c MYCOMMUNITY MYIPADDRESS  mitsubishiUPS
+#
+# Note that you will need to install "MITSUBISHI-UPS-MIB.mib" in order to resolve the requests.
+#
+# Usage:
+#	./check_mitsubishi_ups -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
+#
+#
+# 2023-06-26:  Version 1.0	\\ Alexander Pollak
+#
+##
+
+
+SYSCONTACT=''
+SYSNAME=''
+SYSLOCATION=''
+
+
+SNMPVersion="2c"
+SNMPCommunity="public"
+SNMPTimeout="10"
+SNMPPort="161"
+
+# InfoList for UP9933A
+MIB_IDENTNAME="sysName.0"
+MIB_IDENTLOCATION="upsIdentName.0"
+MIB_IDENTCONTACT="sysContact.0"
+MIB_IDENTFIRM="upsIdentUPSSoftwareVersion.0"
+MIB_UPSSTATUS="upsOutputSource.0"
+
+# VarList for UP9933A
+MIB_BATTERYSTATUS="upsBatteryStatus.0"
+MIB_BATTERYCHARGE="upsEstimatedChargeRemaining.0"
+MIB_BATTERYVOLTAGE="upsBatteryVoltage.0"
+
+MIB_INPUTFREQ="upsInputFrequency.1"
+MIB_INPUTVOLTAGE_L1="upsInputVoltage.1"
+MIB_INPUTVOLTAGE_L2="upsInputVoltage.2"
+MIB_INPUTVOLTAGE_L3="upsInputVoltage.3"
+
+
+MIB_OUTPUTFREQ="upsOutputFrequency.0"
+MIB_OUTPUTVOLTAGE_L1="upsOutputVoltage.1"
+MIB_OUTPUTVOLTAGE_L2="upsOutputVoltage.2"
+MIB_OUTPUTVOLTAGE_L3="upsOutputVoltage.3"
+
+MIB_OUTPUTCURRENT_L1="upsOutputCurrent.1"
+MIB_OUTPUTCURRENT_L2="upsOutputCurrent.2"
+MIB_OUTPUTCURRENT_L3="upsOutputCurrent.3"
+
+MIB_OUTPUTLOADPERCENT_L1="upsOutputPercentLoad.1"
+MIB_OUTPUTLOADPERCENT_L2="upsOutputPercentLoad.2"
+MIB_OUTPUTLOADPERCENT_L3="upsOutputPercentLoad.3"
+
+MIB_OUTPUTPOWER="upsOutputPower.1" #Watts
+
+# Default Values for UPS Warning and Critical Checks:
+
+BWarning="70"   # Charge in %
+BCritical="40"  # Charge in %
+VWarning="473"  # Voltage in V
+VCritical="470" # Voltage in V
+CWarning="90"   # Current in A
+CCritical="102" # Current in A
+LWarning="75"   # Load in %
+LCritical="85"  # Load in %
+
+
+#upsOutputSource OBJECT-TYPE
+#    SYNTAX  INTEGER 
+#    {
+#        other(1),
+#        none(2),
+#        normal(3),
+#        bypass(4),
+#        battery(5),
+#        booster(6),
+#        reducer(7)
+
+#upsBatteryStatus OBJECT-TYPE
+#    SYNTAX  INTEGER 
+#    {
+#        unknown(1),
+#        batteryNormal(2),
+#        batteryLow(3),
+#        batteryDepleted(4)
+#    }
+
+
+# nagios return values
+export STATE_OK=0
+export STATE_WARNING=1
+export STATE_CRITICAL=2
+export STATE_UNKNOWN=3
+export STATE_DEPENDENT=4
+
+intReturn=$STATE_OK
+
+usage()
+{
+	echo "usage: ./check_mitsubishi_ups -h [hostname] -c [community] -s [check]"
+	echo "options:"
+	echo "	-h  [snmp hostname]   Hostname"
+	echo "	-c  [community name]  community name (ex: public)"
+	echo "	-p  [snmp port]       port for snmp request (default: 161)"
+	echo "	-t  [timeout]	      duration before doing an timeout in seconds - default 10s"
+	echo ""
+	echo "	-s  [check]           Check to be executed"
+	echo "	    info              System infos"
+	echo "	    battery_status    Check the Battery status: [Status]"
+	echo "	    battery_charge    Check the Battery status: [Charge, Voltage]"
+	echo "	    input_voltage     Check input: [Voltage]"
+	echo "	    output_voltage    Check output: [Voltage]"
+	echo "	    output_current    Check output: [Current]"
+	echo "	    ups_load          Check UPS status: [Phase Load in %, Total Power]"
+	echo "	    ups_status        Check UPS status: [Status]"
+	echo ""
+	echo "	-A  [Bat. warning]    Threshold for Battery Charge Warning [Default: 70%]"
+	echo "	-B  [Bat. critical]   Threshold for Battery Charge Critical [Default: 40% ]"
+	echo "	-U  [Vol. warning]    Threshold for Input / Output Low Voltage Warning [Default: 473V]"
+	echo "	-V  [Vol. critical]   Threshold for Input / Output Low Voltage Critical [Default: 470V]"
+	echo "	-C  [Cur. warning]    Threshold for Output High Current Warning [Default: 90A]"
+	echo "	-D  [Cur. critical]   Threshold for Output High Current Critical [Default: 102A]"
+	echo "	-K  [Load warning]    Threshold for UPS High Load Warning [Default: 75%]"
+	echo "	-L  [Load critical]   Threshold for UPS High Load Critical [Default: 85%]"
+	echo ""
+	echo "examples:	./check_mitsubishi_ups -h 1.2.3.4 -c public -s info"
+	echo "		./check_mitsubishi_ups -h 1.2.3.4 -p 4321 -c public -s battery_status "
+	echo "		./check_mitsubishi_ups -h 1.2.3.4 -c public -s ups_status"
+	exit 3
+}
+
+if [ "$1" == "--help" ]; then
+	usage; exit 0
+fi
+
+while getopts c:h:p:s:t:A:B:U:V:C:D:K:L: OPTNAME; do
+	case "$OPTNAME" in
+	h)	hostname="$OPTARG";;
+	c)	SNMPCommunity="$OPTARG";;
+	p)	SNMPPort="$OPTARG";;
+	s)	status="$OPTARG";;
+	t)	SNMPTimeout="$OPTARG";;
+	A)	BWarning="$OPTARG";;
+	B)	BCritical="$OPTARG";;
+	U)	VWarning="$OPTARG";;
+	V)	VCritical="$OPTARG";;
+	C)	CWarning="$OPTARG";;
+	D)	CCritical="$OPTARG";;
+	K)	LWarning="$OPTARG";;
+	L)	LCritical="$OPTARG";;
+	esac
+done
+
+
+if [ "$hostname" = "" ] || [ "$SNMPCommunity" = "" ] ; then
+	usage
+else
+	SNMPArgs=" -v $SNMPVersion -c $SNMPCommunity -t $SNMPTimeout $hostname:$SNMPPort"
+
+	case "$status" in
+
+		info)
+			# Status readout for UPS
+			info=`snmpget $SNMPArgs $MIB_IDENTNAME $MIB_IDENTLOCATION $MIB_IDENTCONTACT $MIB_IDENTFIRM $MIB_UPSSTATUS 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				SYSSTATUS=$(echo "$info" | grep "$MIB_UPSSTATUS" | sed 's/.*(\(.*\)).*/\1/' )
+				SYSFIRM=$(echo "$info" | grep "$MIB_IDENTFIRM" | sed 's/.*"\(.*\)".*/\1/')
+				SYSCONTACT=$(echo "$info" | grep "$MIB_IDENTCONTACT" | sed 's/.*"\(.*\)".*/\1/')
+				SYSNAME=$(echo "$info" | grep "$MIB_IDENTNAME" | sed 's/.*"\(.*\)".*/\1/')
+				SYSLOCATION=$(echo "$info" | grep "$MIB_IDENTLOCATION" | sed 's/.*"\(.*\)".*/\1/')
+
+				if [ "$SYSSTATUS" != "" ] ; then
+					case "$SYSSTATUS" in
+						1)	output="\nUPS Status: Other\n";;
+						2)	output="\nUPS Status: None\n";;
+						3)	output="\nUPS Status: Normal\n";;
+						4)	output="\nUPS Status: Bypass\n";;
+						5)	output="\nUPS Status: Battery\n";;
+						6)	output="\nUPS Status: Booster\n";;
+						7)	output="\nUPS Status: Reducer\n";;
+					esac
+				fi
+				if [ "$SYSFIRM" != "" ] ; then
+					output=$output"UPS Software Version - $SYSFIRM\n"
+				fi
+				if [ "$SYSCONTACT" != "" ] ; then
+					output=$output"Contact - $SYSCONTACT\n"
+				fi
+				if [ "$SYSNAME" != "" ] ; then
+					output=$output"Name - $SYSNAME\n"
+				fi
+				if [ "$SYSLOCATION" != "" ] ; then
+					output=$output"Location - $SYSLOCATION\n"
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+
+
+		battery_status)
+	  		# UPS check battery status
+			battery=`snmpget $SNMPArgs $MIB_BATTERYSTATUS`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				BATTERYSTATUS=$(echo "$battery" | grep "$MIB_BATTERYSTATUS" | sed 's/.*(\(.*\)).*/\1/' )
+
+				if [ "$BATTERYSTATUS" != "" ] ; then
+
+					if [ "$BATTERYSTATUS" == "1" ] ; then
+						output="WARNING - Battery Status: Unknown"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$BATTERYSTATUS" == "2" ] ; then
+						output="OK - Battery Status: Normal"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$BATTERYSTATUS" == "3" ] ; then
+						output="CRITICAL - Battery Status: Low"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$BATTERYSTATUS" == "4" ] ; then
+						output="CRITICAL - Battery Status: Depleted"
+						intReturn=$STATE_CRITICAL ;
+					fi
+				else
+					output="WARNING - No UPS Battery Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+		battery_charge)
+	  		# UPS check battery charge
+			battery=`snmpget $SNMPArgs $MIB_BATTERYCHARGE $MIB_BATTERYVOLTAGE`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				BATTERYCHARGE=$(echo "$battery" | grep "$MIB_BATTERYCHARGE" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				BATTERYVOLTAGE=$(echo "$battery" | grep "$MIB_BATTERYVOLTAGE" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				
+				if [ "$BATTERYCHARGE" != "" ]&&[ "$BATTERYVOLTAGE" != "" ] ; then
+					if [ "$BATTERYCHARGE" -ge "$BWarning" ] ; then
+						BATTERYVOLTAGE_DEC1=$(echo "scale=1;$BATTERYVOLTAGE / 10" | bc)
+						output="OK - Charge="$BATTERYCHARGE"% - Voltage="$BATTERYVOLTAGE_DEC1"V"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$BATTERYCHARGE" -lt "$BWarning" ]&&[ "$BATTERYCHARGE" -ge "$BCritical" ] ; then
+						BATTERYVOLTAGE_DEC1=$(echo "scale=1;$BATTERYVOLTAGE / 10" | bc)
+						output="WARNING - Charge is below the warning threshold of "$BWarning"%: Charge="$BATTERYCHARGE"% - Voltage="$BATTERYVOLTAGE_DEC1"V"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$BATTERYCHARGE" -lt "$BCritical" ] ; then
+						BATTERYVOLTAGE_DEC1=$(echo "scale=1;$BATTERYVOLTAGE / 10" | bc)
+						output="CRITICAL - Charge is below the critical threshold of "$BCritical"%: Charge="$BATTERYCHARGE"% - Voltage="$BATTERYVOLTAGE_DEC1"V"
+						intReturn=$STATE_CRITICAL ;
+					fi
+				else
+					output="WARNING - No UPS Battery Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+
+		input_voltage)
+	  		# UPS check intput voltage
+			input=`snmpget $SNMPArgs $MIB_INPUTVOLTAGE_L1 $MIB_INPUTVOLTAGE_L2 $MIB_INPUTVOLTAGE_L3`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				INPUTVOLTAGE_L1=$(echo "$input" | grep "$MIB_INPUTVOLTAGE_L1" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				INPUTVOLTAGE_L2=$(echo "$input" | grep "$MIB_INPUTVOLTAGE_L2" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				INPUTVOLTAGE_L3=$(echo "$input" | grep "$MIB_INPUTVOLTAGE_L3" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+
+				if [ "$INPUTVOLTAGE_L1" != "" ]&&[ "$INPUTVOLTAGE_L2" != "" ]&&[ "$INPUTVOLTAGE_L3" != "" ] ; then
+					if [ "$INPUTVOLTAGE_L1" -ge "$VWarning" ]&&[ "$INPUTVOLTAGE_L2" -ge "$VWarning" ]&&[ "$INPUTVOLTAGE_L3" -ge "$VWarning" ]  ; then
+						output="OK - Input Voltage:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L2="$INPUTVOLTAGE_L3"V"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$INPUTVOLTAGE_L1" -lt "$VWarning" ]||[ "$INPUTVOLTAGE_L2" -lt "$VWarning" ]||[ "$INPUTVOLTAGE_L2" -lt "$VWarning" ] ; then
+						if [ "$INPUTVOLTAGE_L1" -ge "$VCritical" ]&&[ "$INPUTVOLTAGE_L2" -ge "$VCritical" ]&&[ "$INPUTVOLTAGE_L3" -ge "$VCritical" ] ; then
+							output="WARNING - Input Voltage below warning threshold of "$VWarning"V:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L2="$INPUTVOLTAGE_L3"V"
+							intReturn=$STATE_WARNING ;
+						fi
+					fi
+					if [ "$INPUTVOLTAGE_L1" -lt "$VCritical" ]||[ "$INPUTVOLTAGE_L2" -lt "$VCritical" ]||[ "$INPUTVOLTAGE_L3" -lt "$VCritical" ] ; then
+						output="CRITICAL - Input Voltage below critical threshold of "$VCritical"V:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L2="$INPUTVOLTAGE_L3"V"
+						intReturn=$STATE_CRITICAL ;
+					fi
+				else
+					output="WARNING - No UPS Input Voltage Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+		output_voltage)
+	  		# UPS check output voltage
+			input=`snmpget $SNMPArgs $MIB_OUTPUTVOLTAGE_L1 $MIB_OUTPUTVOLTAGE_L2 $MIB_OUTPUTVOLTAGE_L3`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				OUTPUTVOLTAGE_L1=$(echo "$input" | grep "$MIB_OUTPUTVOLTAGE_L1" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				OUTPUTVOLTAGE_L2=$(echo "$input" | grep "$MIB_OUTPUTVOLTAGE_L2" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				OUTPUTVOLTAGE_L3=$(echo "$input" | grep "$MIB_OUTPUTVOLTAGE_L3" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+
+				if [ "$OUTPUTVOLTAGE_L1" != "" ]&&[ "$OUTPUTVOLTAGE_L2" != "" ]&&[ "$OUTPUTVOLTAGE_L3" != "" ] ; then
+					if [ "$OUTPUTVOLTAGE_L1" -ge "$VWarning" ]&&[ "$OUTPUTVOLTAGE_L2" -ge "$VWarning" ]&&[ "$OUTPUTVOLTAGE_L3" -ge "$VWarning" ]  ; then
+						output="OK - Output Voltage:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L2="$OUTPUTVOLTAGE_L3"V"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$OUTPUTVOLTAGE_L1" -lt "$VWarning" ]||[ "$OUTPUTVOLTAGE_L2" -lt "$VWarning" ]||[ "$OUTPUTVOLTAGE_L3" -lt "$VWarning" ] ; then
+						if [ "$OUTPUTVOLTAGE_L1" -ge "$VCritical" ]&&[ "$OUTPUTVOLTAGE_L2" -ge "$VCritical" ]&&[ "$OUTPUTVOLTAGE_L3" -ge "$VCritical" ] ; then
+							output="WARNING - Output Voltage below warning threshold of "$VWarning"V:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L2="$OUTPUTVOLTAGE_L3"V"
+							intReturn=$STATE_WARNING ;
+						fi	
+					fi
+					if [ "$OUTPUTVOLTAGE_L1" -lt "$VCritical" ]||[ "$OUTPUTVOLTAGE_L2" -lt "$VCritical" ]||[ "$OUTPUTVOLTAGE_L3" -lt "$VCritical" ] ; then
+						output="CRITICAL - Output Voltage below critical threshold of "$VCritical"V:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L2="$OUTPUTVOLTAGE_L3"V"
+						intReturn=$STATE_CRITICAL ;
+					fi
+				else
+					output="WARNING - No UPS Output Voltage Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+		output_current)
+	  		# UPS check output current
+			input=`snmpget $SNMPArgs $MIB_OUTPUTCURRENT_L1 $MIB_OUTPUTCURRENT_L2 $MIB_OUTPUTCURRENT_L3`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				CWarning_10=$(echo $((CWarning * 10)))
+				CCritical_10=$(echo $((CCritical * 10)))
+
+				OUTPUTCURRENT_L1=$(echo "$input" | grep "$MIB_OUTPUTCURRENT_L1" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				OUTPUTCURRENT_L2=$(echo "$input" | grep "$MIB_OUTPUTCURRENT_L2" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				OUTPUTCURRENT_L3=$(echo "$input" | grep "$MIB_OUTPUTCURRENT_L3" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+
+				if [ "$OUTPUTCURRENT_L1" != "" ]&&[ "$OUTPUTCURRENT_L2" != "" ]&&[ "$OUTPUTCURRENT_L3" != "" ] ; then
+					if [ "$OUTPUTCURRENT_L1" -le "$CWarning_10" ]&&[ "$OUTPUTCURRENT_L2" -le "$CWarning_10" ]&&[ "$OUTPUTCURRENT_L3" -le "$CWarning_10" ]  ; then
+						OUTPUTCURRENT_L1_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L1 / 10" | bc)
+						OUTPUTCURRENT_L2_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L2 / 10" | bc)
+						OUTPUTCURRENT_L3_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L3 / 10" | bc)
+						output="OK - Output Current:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L2="$OUTPUTCURRENT_L3_DEC1"A"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$OUTPUTCURRENT_L1" -gt "$CWarning_10" ]||[ "$OUTPUTCURRENT_L2" -gt "$CWarning_10" ]||[ "$OUTPUTCURRENT_L3" -gt "$CWarning_10" ] ; then
+						if [ "$OUTPUTCURRENT_L1" -le "$CCritical_10" ]&&[ "$OUTPUTCURRENT_L2" -le "$CCritical_10" ]&&[ "$OUTPUTCURRENT_L3" -le "$CCritical_10" ] ; then
+							OUTPUTCURRENT_L1_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L1 / 10" | bc)
+							OUTPUTCURRENT_L2_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L2 / 10" | bc)
+							OUTPUTCURRENT_L3_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L3 / 10" | bc)
+							output="WARNING - Output Current above warning threshold of "$CWarning"A:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L2="$OUTPUTCURRENT_L3_DEC1"A"
+							intReturn=$STATE_WARNING ;
+						fi
+					fi
+					if [ "$OUTPUTCURRENT_L1" -gt "$CCritical_10" ]||[ "$OUTPUTCURRENT_L2" -gt "$CCritical_10" ]||[ "$OUTPUTCURRENT_L3" -gt "$CCritical_10" ] ; then
+						OUTPUTCURRENT_L1_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L1 / 10" | bc)
+						OUTPUTCURRENT_L2_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L2 / 10" | bc)
+						OUTPUTCURRENT_L3_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L3 / 10" | bc)
+						output="CRITICAL - Output Current above critical threshold of "$CCritical"A:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L2="$OUTPUTCURRENT_L3_DEC1"A"
+						intReturn=$STATE_CRITICAL ;
+					fi
+				else
+					output="WARNING - No UPS Output Current Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+		ups_load)
+	  		# UPS check load
+			load=`snmpget $SNMPArgs $MIB_OUTPUTPOWER $MIB_OUTPUTLOADPERCENT_L1 $MIB_OUTPUTLOADPERCENT_L2 $MIB_OUTPUTLOADPERCENT_L3`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				OUTPUTPOWER=$(echo "$load" | grep "$MIB_OUTPUTPOWER" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				OUTPUTLOADPERCENT_L1=$(echo "$load" | grep "$MIB_OUTPUTLOADPERCENT_L1" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				OUTPUTLOADPERCENT_L2=$(echo "$load" | grep "$MIB_OUTPUTLOADPERCENT_L2" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				OUTPUTLOADPERCENT_L3=$(echo "$load" | grep "$MIB_OUTPUTLOADPERCENT_L3" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+
+
+				if [ "$OUTPUTLOADPERCENT_L1" != "" ]&&[ "$OUTPUTLOADPERCENT_L2" != "" ]&&[ "$OUTPUTLOADPERCENT_L3" != "" ]&&[ "$OUTPUTPOWER" != "" ] ; then
+					if [ "$OUTPUTLOADPERCENT_L1" -le "$LWarning" ]&&[ "$OUTPUTLOADPERCENT_L2" -le "$LWarning" ]&&[ "$OUTPUTLOADPERCENT_L3" -le "$LWarning" ]  ; then
+						OUTPUTPOWER_KW=$(echo "scale=1;$OUTPUTPOWER/ 1000" | bc)
+						output="OK - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L2="$OUTPUTLOADPERCENT_L3"%"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$OUTPUTLOADPERCENT_L1" -gt "$LWarning" ]||[ "$OUTPUTLOADPERCENT_L2" -gt "$LWarning" ]||[ "$OUTPUTLOADPERCENT_L3" -gt "$LWarning" ] ; then
+						if [ "$OUTPUTLOADPERCENT_L1" -le "$LCritical" ]&&[ "$OUTPUTLOADPERCENT_L2" -le "$LCritical" ]&&[ "$OUTPUTLOADPERCENT_L3" -le "$LCritical" ] ; then
+							OUTPUTPOWER_KW=$(echo "scale=1;$OUTPUTPOWER/ 1000" | bc)
+							output="WARNING - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load above warning threshold of "$LWarning"%:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L2="$OUTPUTLOADPERCENT_L3"%"
+							intReturn=$STATE_WARNING ;
+						fi
+					fi
+					if [ "$OUTPUTLOADPERCENT_L1" -gt "$LCritical" ]||[ "$OUTPUTLOADPERCENT_L2" -gt "$LCritical" ]||[ "$OUTPUTLOADPERCENT_L3" -gt "$LCritical" ] ; then
+						OUTPUTPOWER_KW=$(echo "scale=1;$OUTPUTPOWER/ 1000" | bc)
+						output="CRITICAL - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load above critical threshold of "$LCritical"%:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L2="$OUTPUTLOADPERCENT_L3"%"
+						intReturn=$STATE_CRITICAL ;
+					fi
+				else
+					output="WARNING - No UPS Load Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+		ups_status)
+	  		# UPS check status
+			status=`snmpget $SNMPArgs $MIB_UPSSTATUS`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				UPSSTATUS=$(echo "$status" | grep "$MIB_UPSSTATUS" | sed 's/.*(\(.*\)).*/\1/' )
+
+				if [ "$UPSSTATUS" != "" ] ; then
+
+					if [ "$UPSSTATUS" == "1" ] ; then
+						output="WARNING - UPS Status: Other"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$UPSSTATUS" == "2" ] ; then
+						output="WARNING - UPS Status: None"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$UPSSTATUS" == "3" ] ; then
+						output="OK - UPS Status: Normal"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$UPSSTATUSS" == "4" ] ; then
+						output="WARNING - UPS Status: Bypass"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$UPSSTATUSS" == "5" ] ; then
+						output="CRITICAL - UPS Status: Battery"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$UPSSTATUSS" == "6" ] ; then
+						output="WARNING - UPS Status: Booster"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$UPSSTATUSS" == "7" ] ; then
+						output="WARNING - UPS Status: Reducer"
+						intReturn=$STATE_WARNING ;
+					fi
+				else
+					output="WARNING - No UPS Status Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+		
+	esac
+
+	echo -e $output
+	exit $intReturn
+fi
