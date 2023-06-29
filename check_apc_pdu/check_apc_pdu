@@ -521,7 +521,7 @@ else
 							output="OK - Load current is lower then threshold: - Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A "
 							intReturn=$STATE_OK ;
 						fi
-						if [ "$PDU1CURRENT" -gt "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -lt "$PDU1OVERLOAD_10" ]  ; then
+						if [ "$PDU1CURRENT" -ge "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -le "$PDU1OVERLOAD_10" ]  ; then
 							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
 							output="WARNING - Load current is over the warning threshold: - Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A "
 							intReturn=$STATE_WARNING ;
@@ -565,17 +565,17 @@ else
 							output="OK - Load current is lower then threshold:  -PDU1: Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A  -PDU2: Load="$PDU2CURRENT_DEC1"A  Warning="$PDU2NEAROVERLOAD"A  Critical="$PDU2OVERLOAD"A"
 							intReturn=$STATE_OK ;
 						fi
-						if [ "$PDU1CURRENT" -gt "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -lt "$PDU1OVERLOAD_10" ]  ; then
+						if [ "$PDU1CURRENT" -ge "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -le "$PDU1OVERLOAD_10" ]  ; then
 							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
 							output="WARNING - PDU1 Load current is over the warning threshold: - Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A "
 							intReturn=$STATE_WARNING ;
 						fi
-						if [ "$PDU2CURRENT" -gt "$PDU2NEAROVERLOAD_10" ]&&[ "$PDU2CURRENT" -lt "$PDU2OVERLOAD_10" ]  ; then
+						if [ "$PDU2CURRENT" -ge "$PDU2NEAROVERLOAD_10" ]&&[ "$PDU2CURRENT" -le "$PDU2OVERLOAD_10" ]  ; then
 							PDU2CURRENT_DEC1=$(echo "scale=1;$PDU2CURRENT / 10" | bc)
 							output="WARNING - PDU2 Load current is over the warning threshold: - Load="$PDU2CURRENT_DEC1"A  Warning="$PDU2NEAROVERLOAD"A  Critical="$PDU2OVERLOAD"A "
 							intReturn=$STATE_WARNING ;
 						fi
-						if [ "$PDU1CURRENT" -gt "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -lt "$PDU1OVERLOAD_10" ]&&[ "$PDU2CURRENT" -gt "$PDU2NEAROVERLOAD_10" ]&&[ "$PDU2CURRENT" -lt "$PDU2OVERLOAD_10" ]  ; then
+						if [ "$PDU1CURRENT" -ge "$PDU1NEAROVERLOAD_10" ]&&[ "$PDU1CURRENT" -le "$PDU1OVERLOAD_10" ]&&[ "$PDU2CURRENT" -ge "$PDU2NEAROVERLOAD_10" ]&&[ "$PDU2CURRENT" -le "$PDU2OVERLOAD_10" ]  ; then
 							PDU1CURRENT_DEC1=$(echo "scale=1;$PDU1CURRENT / 10" | bc)
 							PDU2CURRENT_DEC1=$(echo "scale=1;$PDU2CURRENT / 10" | bc)
 							output="WARNING - PDU1 and PDU2 Load current is over the warning threshold:  -PDU1: Load="$PDU1CURRENT_DEC1"A  Warning="$PDU1NEAROVERLOAD"A  Critical="$PDU1OVERLOAD"A  -PDU2: Load="$PDU2CURRENT_DEC1"A  Warning="$PDU2NEAROVERLOAD"A  Critical="$PDU2OVERLOAD"A"
