@@ -300,17 +300,17 @@ else
 
 				if [ "$INPUTVOLTAGE_L1" != "" ]&&[ "$INPUTVOLTAGE_L2" != "" ]&&[ "$INPUTVOLTAGE_L3" != "" ] ; then
 					if [ "$INPUTVOLTAGE_L1" -ge "$VWarning" ]&&[ "$INPUTVOLTAGE_L2" -ge "$VWarning" ]&&[ "$INPUTVOLTAGE_L3" -ge "$VWarning" ]  ; then
-						output="OK - Input Voltage:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L2="$INPUTVOLTAGE_L3"V"
+						output="OK - Input Voltage:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L3="$INPUTVOLTAGE_L3"V"
 						intReturn=$STATE_OK ;
 					fi
 					if [ "$INPUTVOLTAGE_L1" -lt "$VWarning" ]||[ "$INPUTVOLTAGE_L2" -lt "$VWarning" ]||[ "$INPUTVOLTAGE_L2" -lt "$VWarning" ] ; then
 						if [ "$INPUTVOLTAGE_L1" -ge "$VCritical" ]&&[ "$INPUTVOLTAGE_L2" -ge "$VCritical" ]&&[ "$INPUTVOLTAGE_L3" -ge "$VCritical" ] ; then
-							output="WARNING - Input Voltage below warning threshold of "$VWarning"V:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L2="$INPUTVOLTAGE_L3"V"
+							output="WARNING - Input Voltage below warning threshold of "$VWarning"V:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L3="$INPUTVOLTAGE_L3"V"
 							intReturn=$STATE_WARNING ;
 						fi
 					fi
 					if [ "$INPUTVOLTAGE_L1" -lt "$VCritical" ]||[ "$INPUTVOLTAGE_L2" -lt "$VCritical" ]||[ "$INPUTVOLTAGE_L3" -lt "$VCritical" ] ; then
-						output="CRITICAL - Input Voltage below critical threshold of "$VCritical"V:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L2="$INPUTVOLTAGE_L3"V"
+						output="CRITICAL - Input Voltage below critical threshold of "$VCritical"V:  L1="$INPUTVOLTAGE_L1"V  L2="$INPUTVOLTAGE_L2"V  L3="$INPUTVOLTAGE_L3"V"
 						intReturn=$STATE_CRITICAL ;
 					fi
 				else
@@ -334,17 +334,17 @@ else
 
 				if [ "$OUTPUTVOLTAGE_L1" != "" ]&&[ "$OUTPUTVOLTAGE_L2" != "" ]&&[ "$OUTPUTVOLTAGE_L3" != "" ] ; then
 					if [ "$OUTPUTVOLTAGE_L1" -ge "$VWarning" ]&&[ "$OUTPUTVOLTAGE_L2" -ge "$VWarning" ]&&[ "$OUTPUTVOLTAGE_L3" -ge "$VWarning" ]  ; then
-						output="OK - Output Voltage:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L2="$OUTPUTVOLTAGE_L3"V"
+						output="OK - Output Voltage:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L3="$OUTPUTVOLTAGE_L3"V"
 						intReturn=$STATE_OK ;
 					fi
 					if [ "$OUTPUTVOLTAGE_L1" -lt "$VWarning" ]||[ "$OUTPUTVOLTAGE_L2" -lt "$VWarning" ]||[ "$OUTPUTVOLTAGE_L3" -lt "$VWarning" ] ; then
 						if [ "$OUTPUTVOLTAGE_L1" -ge "$VCritical" ]&&[ "$OUTPUTVOLTAGE_L2" -ge "$VCritical" ]&&[ "$OUTPUTVOLTAGE_L3" -ge "$VCritical" ] ; then
-							output="WARNING - Output Voltage below warning threshold of "$VWarning"V:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L2="$OUTPUTVOLTAGE_L3"V"
+							output="WARNING - Output Voltage below warning threshold of "$VWarning"V:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L3="$OUTPUTVOLTAGE_L3"V"
 							intReturn=$STATE_WARNING ;
 						fi	
 					fi
 					if [ "$OUTPUTVOLTAGE_L1" -lt "$VCritical" ]||[ "$OUTPUTVOLTAGE_L2" -lt "$VCritical" ]||[ "$OUTPUTVOLTAGE_L3" -lt "$VCritical" ] ; then
-						output="CRITICAL - Output Voltage below critical threshold of "$VCritical"V:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L2="$OUTPUTVOLTAGE_L3"V"
+						output="CRITICAL - Output Voltage below critical threshold of "$VCritical"V:  L1="$OUTPUTVOLTAGE_L1"V  L2="$OUTPUTVOLTAGE_L2"V  L3="$OUTPUTVOLTAGE_L3"V"
 						intReturn=$STATE_CRITICAL ;
 					fi
 				else
@@ -375,7 +375,7 @@ else
 						OUTPUTCURRENT_L1_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L1 / 10" | bc)
 						OUTPUTCURRENT_L2_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L2 / 10" | bc)
 						OUTPUTCURRENT_L3_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L3 / 10" | bc)
-						output="OK - Output Current:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L2="$OUTPUTCURRENT_L3_DEC1"A"
+						output="OK - Output Current:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L3="$OUTPUTCURRENT_L3_DEC1"A"
 						intReturn=$STATE_OK ;
 					fi
 					if [ "$OUTPUTCURRENT_L1" -gt "$CWarning_10" ]||[ "$OUTPUTCURRENT_L2" -gt "$CWarning_10" ]||[ "$OUTPUTCURRENT_L3" -gt "$CWarning_10" ] ; then
@@ -383,7 +383,7 @@ else
 							OUTPUTCURRENT_L1_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L1 / 10" | bc)
 							OUTPUTCURRENT_L2_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L2 / 10" | bc)
 							OUTPUTCURRENT_L3_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L3 / 10" | bc)
-							output="WARNING - Output Current above warning threshold of "$CWarning"A:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L2="$OUTPUTCURRENT_L3_DEC1"A"
+							output="WARNING - Output Current above warning threshold of "$CWarning"A:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L3="$OUTPUTCURRENT_L3_DEC1"A"
 							intReturn=$STATE_WARNING ;
 						fi
 					fi
@@ -391,7 +391,7 @@ else
 						OUTPUTCURRENT_L1_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L1 / 10" | bc)
 						OUTPUTCURRENT_L2_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L2 / 10" | bc)
 						OUTPUTCURRENT_L3_DEC1=$(echo "scale=1;$OUTPUTCURRENT_L3 / 10" | bc)
-						output="CRITICAL - Output Current above critical threshold of "$CCritical"A:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L2="$OUTPUTCURRENT_L3_DEC1"A"
+						output="CRITICAL - Output Current above critical threshold of "$CCritical"A:  L1="$OUTPUTCURRENT_L1_DEC1"A  L2="$OUTPUTCURRENT_L2_DEC1"A  L3="$OUTPUTCURRENT_L3_DEC1"A"
 						intReturn=$STATE_CRITICAL ;
 					fi
 				else
@@ -419,19 +419,19 @@ else
 				if [ "$OUTPUTLOADPERCENT_L1" != "" ]&&[ "$OUTPUTLOADPERCENT_L2" != "" ]&&[ "$OUTPUTLOADPERCENT_L3" != "" ]&&[ "$OUTPUTPOWER" != "" ] ; then
 					if [ "$OUTPUTLOADPERCENT_L1" -le "$LWarning" ]&&[ "$OUTPUTLOADPERCENT_L2" -le "$LWarning" ]&&[ "$OUTPUTLOADPERCENT_L3" -le "$LWarning" ]  ; then
 						OUTPUTPOWER_KW=$(echo "scale=1;$OUTPUTPOWER/ 1000" | bc)
-						output="OK - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L2="$OUTPUTLOADPERCENT_L3"%"
+						output="OK - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L3="$OUTPUTLOADPERCENT_L3"%"
 						intReturn=$STATE_OK ;
 					fi
 					if [ "$OUTPUTLOADPERCENT_L1" -gt "$LWarning" ]||[ "$OUTPUTLOADPERCENT_L2" -gt "$LWarning" ]||[ "$OUTPUTLOADPERCENT_L3" -gt "$LWarning" ] ; then
 						if [ "$OUTPUTLOADPERCENT_L1" -le "$LCritical" ]&&[ "$OUTPUTLOADPERCENT_L2" -le "$LCritical" ]&&[ "$OUTPUTLOADPERCENT_L3" -le "$LCritical" ] ; then
 							OUTPUTPOWER_KW=$(echo "scale=1;$OUTPUTPOWER/ 1000" | bc)
-							output="WARNING - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load above warning threshold of "$LWarning"%:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L2="$OUTPUTLOADPERCENT_L3"%"
+							output="WARNING - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load above warning threshold of "$LWarning"%:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L3="$OUTPUTLOADPERCENT_L3"%"
 							intReturn=$STATE_WARNING ;
 						fi
 					fi
 					if [ "$OUTPUTLOADPERCENT_L1" -gt "$LCritical" ]||[ "$OUTPUTLOADPERCENT_L2" -gt "$LCritical" ]||[ "$OUTPUTLOADPERCENT_L3" -gt "$LCritical" ] ; then
 						OUTPUTPOWER_KW=$(echo "scale=1;$OUTPUTPOWER/ 1000" | bc)
-						output="CRITICAL - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load above critical threshold of "$LCritical"%:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L2="$OUTPUTLOADPERCENT_L3"%"
+						output="CRITICAL - Total Load: "$OUTPUTPOWER_KW"kw  - UPS Phase Load above critical threshold of "$LCritical"%:  L1="$OUTPUTLOADPERCENT_L1"%  L2="$OUTPUTLOADPERCENT_L2"%  L3="$OUTPUTLOADPERCENT_L3"%"
 						intReturn=$STATE_CRITICAL ;
 					fi
 				else
