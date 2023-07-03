@@ -73,26 +73,6 @@ LWarning="75"   # Load in %
 LCritical="85"  # Load in %
 
 
-#upsOutputSource OBJECT-TYPE
-#    SYNTAX  INTEGER 
-#    {
-#        other(1),
-#        none(2),
-#        normal(3),
-#        bypass(4),
-#        battery(5),
-#        booster(6),
-#        reducer(7)
-
-#upsBatteryStatus OBJECT-TYPE
-#    SYNTAX  INTEGER 
-#    {
-#        unknown(1),
-#        batteryNormal(2),
-#        batteryLow(3),
-#        batteryDepleted(4)
-#    }
-
 
 # nagios return values
 export STATE_OK=0
@@ -349,7 +329,7 @@ else
 					fi
 				else
 					output="WARNING - No UPS Output Voltage Information Returned"
-					intReturn=$STATE_WARNING
+					intReturn=$STATE_WARNING 
 				fi
 			fi
 		;;
