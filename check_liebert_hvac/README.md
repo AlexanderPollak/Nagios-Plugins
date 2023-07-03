@@ -53,8 +53,8 @@ change in the fourth line "#mibs" to "mibs ALL"
 # Example Returns:
 ```
 ./check_liebert_hvac -h 1.2.3.4 -p 4321 -c public -s runtime
-""
+"HVAC Runtimes - Comp1.=16776h - Comp2.=16793h - Humidifier=1286h - Dehumidifier=6271h - Heater1=35h - Heater2=37h - Heater3=34h"
 
 ./check_mitsubishi_ups -h 1.2.3.4 -c public -s comp_temp
-""
+"OK - Comp.1=64degC - Comp.2=29degC"
 ```
