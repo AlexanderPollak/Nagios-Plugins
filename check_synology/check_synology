@@ -221,7 +221,7 @@ else
 					esac
 				fi
 				# Convert Return to String
-				if [ "$$DSMUpgradeAvailable" != "" ] ; then
+				if [ "$DSMUpgradeAvailable" != "" ] ; then
 					case $DSMUpgradeAvailable in
 					1)	DSMUpgradeAvailable="Available";;
 					2)	DSMUpgradeAvailable="Unavailable";;
@@ -636,14 +636,18 @@ else
 				# Convert Return to String
 				if [ "$$DSMUpgradeAvailable" != "" ] ; then
 					case $DSMUpgradeAvailable in
-					1)	DSMUpgradeAvailable="Available" 		forReturn=$STATE_WARNING;		output=$output"DSM update: $DSMUpgradeAvailable";;
-					2)	DSMUpgradeAvailable="Unavailable"		forReturn=$STATE_OK;			output=$output"DSM update: $DSMUpgradeAvailable";;
-					3)	DSMUpgradeAvailable="Connecting"		forReturn=$STATE_OK;			output=$output"DSM update: $DSMUpgradeAvailable";;					
-					4)	DSMUpgradeAvailable="Disconnected"		forReturn=$STATE_WARNING;		output=$output"DSM update: $DSMUpgradeAvailable";;
-					5)	DSMUpgradeAvailable="Others"			forReturn=$STATE_WARNING;		output=$output"DSM update: $DSMUpgradeAvailable";;
-					*)	DSMUpgradeAvailable="UNKNOWN"			forReturn=$STATE_WARNING;		output=$output"DSM update: $DSMUpgradeAvailable";;
+					1)	DSMUpgradeAvailable="Available" 		intReturn=$STATE_WARNING;		output=$output"DSM update: $DSMUpgradeAvailable";;
+					2)	DSMUpgradeAvailable="Unavailable"		intReturn=$STATE_OK;			output=$output"DSM update: $DSMUpgradeAvailable";;
+					3)	DSMUpgradeAvailable="Connecting"		intReturn=$STATE_OK;			output=$output"DSM update: $DSMUpgradeAvailable";;					
+					4)	DSMUpgradeAvailable="Disconnected"		intReturn=$STATE_WARNING;		output=$output"DSM update: $DSMUpgradeAvailable";;
+					5)	DSMUpgradeAvailable="Others"			intReturn=$STATE_WARNING;		output=$output"DSM update: $DSMUpgradeAvailable";;
+					*)	DSMUpgradeAvailable="UNKNOWN"			intReturn=$STATE_WARNING;		output=$output"DSM update: $DSMUpgradeAvailable";;
 					esac
 				fi
+			fi
+			if [ "$output" == "" ] ; then
+				output="No information returned"
+				intReturn=$STATE_WARNING
 			fi
 		;;	
 

@@ -1,0 +1,627 @@
+#!/bin/bash
+
+##
+#
+# Check Raid Controller information from storcli
+#
+# Requires storcli to be installed in "/opt/MegaRAID/storcli/storcli64"
+# or perccli to be installed in "/opt/MegaRAID/perccli/perccli64"
+#
+#
+# Usage:
+#	./check_storcli -s STATUSCHECK -p PATH
+#
+#
+# Tested with AVAGO 3108 MegaRAID / PERC H330 Mini
+#---------------------------------------------------
+#
+# 2023-07-13:  Version 1.0	\\ Alexander Pollak
+#
+##
+
+ 
+STORCLI="/opt/MegaRAID/storcli/storcli64"
+#STORCLI="/opt/MegaRAID/perccli/perccli64"
+#STORCLI=$(which storcli64)
+SU="sudo"
+
+# Query Commands for storcli64
+CMD_ctlcount="show ctrlcount"	
+CMD_battery="/cv show all"
+CMD_all="show all"
+CMD_raid="/dall show all"
+CMD_disk="/eall /sall show"
+
+# Default Values for Warning and Critical Checks:
+
+
+# nagios return values
+export STATE_OK=0
+export STATE_WARNING=1
+export STATE_CRITICAL=2
+export STATE_UNKNOWN=3
+export STATE_DEPENDENT=4
+
+intReturn=$STATE_OK
+
+usage()
+{
+        echo "usage: ./check_storcli -s [check]"
+        echo "options:"
+        echo ""
+        echo "	-p  [path]            Specifies the path to StorCLI, default [$STORCLI]"
+        echo "	-s  [check]           Check to be executed"
+        echo "	    info              Show raid controller infos" 
+        echo "	    battery           Check battery backup unit"
+        echo "	    disk_l            Check disk status, show individual disks"
+        echo "	    disk_s            Check disk status, show summary"      
+        echo "	    raid_l            Check raid status, show individual raids"
+        echo "	    raid_s            Check raid status, show summary"
+        echo "	    ctl               Check raid controller status"
+        echo ""
+        echo "Note the script needs to be exectuted as sudo in order for storcli to access the Raid Controller."
+        echo ""
+        echo "examples:	./check_storcli -s info"	
+        echo "	     	./check_storcli -s raid_s"	
+        exit 3
+}
+
+
+
+if [ "$1" == "--help" ]; then
+    usage; exit 0
+fi
+
+while getopts p:s: OPTNAME; do
+	case "$OPTNAME" in
+	s)	status="$OPTARG";;
+	p)	STORCLI="$OPTARG";;
+	*)	usage;;
+        esac
+done
+
+
+
+
+
+if [ "$status" = "" ] ; then
+	usage
+else
+	if [ "$STORCLI" = "" ] ; then
+		echo "Cannot find storcli64. Please install it."
+		exit 1
+	fi
+	case "$status" in
+
+		info)
+			# Get Number of RAID Controllers
+#			cli=`cat sis1-show-ctrlcount 2> /dev/null`
+			cli=`$SU $STORCLI $CMD_ctlcount 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem no RAID Controller Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				ctlcount=$(echo "$cli" | grep "Controller Count" | sed 's/.*Controller Count = \(.*\).*/\1/')
+				# Query raid controller information
+				if [ "$ctlcount" != "" ] ; then
+					for i in `seq 1 $ctlcount`; do
+					
+					CMD_RAID=" /c$(($i-1)) $CMD_all " 
+					cli=`$SU $STORCLI $CMD_RAID 2> /dev/null`
+					
+					if [ "$?" != "0" ] ; then
+						output="CRITICAL - Problem no RAID Controller Information Returned."
+						intReturn=$STATE_CRITICAL;
+					fi
+					RAIDModel[$i]=$(echo "$cli" | grep "Model" | head -1 | sed 's/.*Model = \(.*\).* \n/\1/')
+					RAIDSerial[$i]=$(echo "$cli" | grep "Serial Number" | sed 's/.*Serial Number = \(.*\).*/\1/')
+					RAIDTime[$i]=$(echo "$cli" | grep "Current Controller Date" | sed 's/.*Time = \(.*\).*/\1/')
+					RAIDFwBuild[$i]=$(echo "$cli" | grep "Firmware Package" | sed 's/.*Firmware Package Build = \(.*\).*/\1/')
+					RAIDFwVersion[$i]=$(echo "$cli" | grep "Firmware Version" | sed 's/.*Firmware Version = \(.*\).*/\1/')
+					RAIDCtlStatus[$i]=$(echo "$cli" | grep "Controller Status" | sed 's/.*Controller Status = \(.*\).*/\1/')
+					done
+					
+					for i in `seq 1 $ctlcount`; do
+					output=$output"- RAID Controller: $(($i-1)) -\n"				
+					output=$output"Model:  -  "${RAIDModel[$i]}"\n"
+					output=$output"Serial:  -  "${RAIDSerial[$i]}"\n"
+					output=$output"FW Build:  -  "${RAIDFwBuild[$i]}"\n"
+					output=$output"FW Version:  -  "${RAIDFwVersion[$i]}"\n"
+					output=$output"Date/Time:  -  "${RAIDTime[$i]}"\n"
+					output=$output"Status:  -  "${RAIDCtlStatus[$i]}"\n\n"
+					done
+				fi
+			
+			if [ "$output" == "" ] ; then
+				output="No information returned"
+				intReturn=$STATE_WARNING
+			else
+				output=${output:0:${#output}-4}
+			fi
+
+
+			fi
+		;;	
+
+
+
+		battery)
+			# Get Number of RAID Controllers
+			cli=`$SU $STORCLI $CMD_ctlcount 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem no RAID Controller Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				ctlcount=$(echo "$cli" | grep "Controller Count" | sed 's/.*Controller Count = \(.*\).*/\1/')
+				# Query raid controller information
+				if [ "$ctlcount" != "" ] ; then
+					forReturn=$STATE_OK
+					for i in `seq 1 $ctlcount`; do
+					
+					CMD_BATTERY=" /c$(($i-1)) $CMD_battery " 
+					cli=`$SU $STORCLI $CMD_BATTERY 2> /dev/null`
+
+					if [ "$?" != "0" ] ; then
+						output="CRITICAL - Problem no RAID Controller Information Returned."
+						intReturn=$STATE_CRITICAL;
+					fi
+					# If no Battery is installed
+					BATTERYTmp[$i]=$(echo "$cli" | grep "Detailed Status :" -A6 | tail -n1)
+					j=1
+						for data in ${BATTERYTmp[$i]}; do
+  							BATTERYdata[$i,$j]=$data
+  							j=$(($j+1))
+						done
+
+					if [ "${BATTERYdata[$i,7]}" == "34" ] ; then
+						output="No Battery Installed\m"
+						intReturn=$STATE_OK
+					else
+					# Else display Battery Information
+						BATTERYType[$i]=$(echo "$cli" | grep "Type" | sed 's/.*Type\(.*\).*/\1/' | sed "s/ //g")
+						BATTERYTemp[$i]=$(echo "$cli" | grep "Temperature" | sed 's/.*Temperature\(.*\) C.*/\1/'| sed "s/ //g")
+						BATTERYState[$i]=$(echo "$cli" | grep "State" | head -1 | sed 's/.*State\(.*\).*/\1/'| sed "s/ //g")
+						BATTERYCapacitance[$i]=$(echo "$cli" | grep "Capacitance" | sed 's/.*Capacitance\(.*\) %.*/\1/'| sed "s/ //g")
+
+
+
+						output=$output"RAID Controller $(($i-1)) Battery - Type: "${BATTERYType[$i]}", State: "${BATTERYState[$i]}", Temp: "${BATTERYTemp[$i]}"C, Capacitance: "${BATTERYCapacitance[$i]}"% \n"
+						if [ "${BATTERYState[$i]}" != "Optimal" ] ; then 
+							forReturn=$STATE_CRITICAL
+						fi				
+
+						#Set intReturn based on values returned from Battery check
+						if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_WARNING;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+					fi
+					done
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				else
+					output=${output:0:${#output}-2}
+				fi
+			fi
+		;;	
+
+
+
+		raid_l)
+			# Check RAID 
+			cli=`$SU $STORCLI $CMD_ctlcount 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem no RAID Controller Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				ctlcount=$(echo "$cli" | grep "Controller Count" | sed 's/.*Controller Count = \(.*\).*/\1/')
+				# Query raid controller information
+				if [ "$ctlcount" != "" ] ; then
+					forReturn=$STATE_OK
+					for i in `seq 1 $ctlcount`; do
+					
+						CMD_RAID=" /c$(($i-1)) $CMD_raid " 
+						cli=`$SU $STORCLI $CMD_RAID 2> /dev/null`
+
+						if [ "$?" != "0" ] ; then
+							output="CRITICAL - Problem no RAID Controller Information Returned."
+							intReturn=$STATE_CRITICAL;
+						fi
+						
+						# Read VD count and Read all values in the VD List
+						VDcount[$i]=$(echo "$cli" | grep "Total VD Count = " | sed 's/.*Total VD Count = \(.*\).*/\1/' | sed "s/ //g")
+						VDinfo[$i]=$(echo "$cli" | grep "VD LIST :" -A$((${VDcount[$i]}+5)) | tail -n "$((${VDcount[$i]}))" )
+					
+				
+						# each RAID table entry provides 11 variables: [DG/VD, TYPE, State, Access, Consist, Cache, Cac, sCC, Size, Unit, Name] 
+						j=1
+						for data in ${VDinfo[$i]}; do
+  							VDdata[$i,$j]=$data
+  							j=$(($j+1))
+						done
+						
+						# Convert in Individual Variables
+						for k in `seq 1 ${VDcount[$i]}`; do		
+							VDType[$i,$k]=${VDdata[$i,(2 + $(echo $(((k-1) * 11))))]}
+							VDState[$i,$k]=${VDdata[$i,(3 + $(echo $(((k-1) * 11))))]}
+							VDConsist[$i,$k]=${VDdata[$i,(5 + $(echo $(((k-1) * 11))))]}
+							VDSize[$i,$k]=${VDdata[$i,(9 + $(echo $(((k-1) * 11))))]}
+							VDUnit[$i,$k]=${VDdata[$i,(10 + $(echo $(((k-1) * 11))))]}
+							VDName[$i,$k]=${VDdata[$i,(11 + $(echo $(((k-1) * 11))))]}
+						done
+					
+					
+						# Create Output
+						# Check all RAID volume status
+						forReturn=$STATE_OK
+						for k in `seq 1 ${VDcount[$i]}`; do
+							case ${VDState[$i,$k]} in
+								Optl)	if [ ${VDConsist[$i,$k]} == "Yes" ] ; then fotReturn=$STATE_OK; else forReturn=$STATE_WARNING; fi ; output=$output"RAID status (${VDName[$i,$k]}): [Optimal]  -  Consistent: ${VDConsist[$i,$k]}  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+								Pdgd)	forReturn=$STATE_CRITICAL;		output=$output"RAID status (${VDName[$i,$k]}): [Partially Degraded]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+								Dgrd)	forReturn=$STATE_CRITICAL;		output=$output"RAID status (${VDName[$i,$k]}): [Degraded]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+								OfLn)	forReturn=$STATE_CRITICAL;		output=$output"RAID status (${VDName[$i,$k]}): [Offline]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+								*)		forReturn=$STATE_WARNING;		output=$output"RAID status (${VDName[$i,$k]}): [UNKNOWN]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+							esac
+							if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_WARNING;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+						done
+					done
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				else
+					output=${output:0:${#output}-2}
+				fi
+			fi
+		;;	
+
+		raid_s)
+			# Check RAID 
+			cli=`$SU $STORCLI $CMD_ctlcount 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem no RAID Controller Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				ctlcount=$(echo "$cli" | grep "Controller Count" | sed 's/.*Controller Count = \(.*\).*/\1/')
+				# Query raid controller information
+				if [ "$ctlcount" != "" ] ; then
+					forReturn=$STATE_OK
+					for i in `seq 1 $ctlcount`; do
+					
+						CMD_RAID=" /c$(($i-1)) $CMD_raid " 					
+						cli=`$SU $STORCLI $CMD_RAID 2> /dev/null`
+
+						if [ "$?" != "0" ] ; then
+							output="CRITICAL - Problem no RAID Controller Information Returned."
+							intReturn=$STATE_CRITICAL;
+						fi
+						
+						# Read VD count and Read all values in the VD List
+						VDcount[$i]=$(echo "$cli" | grep "Total VD Count = " | sed 's/.*Total VD Count = \(.*\).*/\1/' | sed "s/ //g")
+						VDinfo[$i]=$(echo "$cli" | grep "VD LIST :" -A$((${VDcount[$i]}+5)) | tail -n "$((${VDcount[$i]}))" )
+					
+				
+						# each RAID table entry provides 11 variables: [DG/VD, TYPE, State, Access, Consist, Cache, Cac, sCC, Size, Unit, Name] 
+						j=1
+						for data in ${VDinfo[$i]}; do
+  							VDdata[$i,$j]=$data
+  							j=$(($j+1))
+						done
+						
+						# Convert in Individual Variables
+						for k in `seq 1 ${VDcount[$i]}`; do		
+							VDType[$i,$k]=${VDdata[$i,(2 + $(echo $(((k-1) * 11))))]}
+							VDState[$i,$k]=${VDdata[$i,(3 + $(echo $(((k-1) * 11))))]}
+							VDConsist[$i,$k]=${VDdata[$i,(5 + $(echo $(((k-1) * 11))))]}
+							VDSize[$i,$k]=${VDdata[$i,(9 + $(echo $(((k-1) * 11))))]}
+							VDUnit[$i,$k]=${VDdata[$i,(10 + $(echo $(((k-1) * 11))))]}
+							VDName[$i,$k]=${VDdata[$i,(11 + $(echo $(((k-1) * 11))))]}
+						done
+					
+						# Create Output
+						# Check all RAID volume status
+						forReturn=$STATE_OK
+						for k in `seq 1 ${VDcount[$i]}`; do
+							case ${VDState[$i,$k]} in
+								Optl)	if [ ${VDConsist[$i,$k]} == "Yes" ] ; then forReturn=$STATE_OK; else forReturn=$STATE_WARNING; output=$output"RAID status (${VDName[$i,$k]}): [Optimal]  -  Consistent: [${VDConsist[$i,$k]}]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n"; fi ;;
+								Pdgd)	forReturn=$STATE_CRITICAL;		output=$output"RAID status (${VDName[$i,$k]}): [Partially Degraded]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+								Dgrd)	forReturn=$STATE_CRITICAL;		output=$output"RAID status (${VDName[$i,$k]}): [Degraded]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+								OfLn)	forReturn=$STATE_CRITICAL;		output=$output"RAID status (${VDName[$i,$k]}): [Offline]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+								*)		forReturn=$STATE_WARNING;		output=$output"RAID status (${VDName[$i,$k]}): [UNKNOWN]  -  Size: ${VDSize[$i,$k]}${VDUnit[$i,$k]}  -  Type: ${VDType[$i,$k]}\n";;
+							esac
+							if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_WARNING;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+						done
+					VDTotal=$((VDTotal + VDCount[$i]))
+					done
+					
+					if [ "$intReturn" == "$STATE_OK" ] ; then						
+						output="Number of RAIDs: ${VDcount[$i]}  -  Status: [Optimal]  -  Consistent: [Yes] \n"
+					fi
+
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				else
+					output=${output:0:${#output}-2}
+				fi
+			fi
+		;;	
+
+
+		disk_l)
+			# Check Individual Disks
+			cli=`$SU $STORCLI $CMD_ctlcount 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem no RAID Controller Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				ctlcount=$(echo "$cli" | grep "Controller Count" | sed 's/.*Controller Count = \(.*\).*/\1/')
+				# Query raid controller information
+				if [ "$ctlcount" != "" ] ; then
+					forReturn=$STATE_OK
+					for i in `seq 1 $ctlcount`; do
+					
+						CMD_DISK=" /c$(($i-1)) $CMD_disk " 
+						CMD_NDRIVE=" /c$(($i-1)) $CMD_all "
+						cli=`$SU $STORCLI $CMD_DISK 2> /dev/null`
+						nDrive=`$SU $STORCLI $CMD_NDRIVE 2> /dev/null`
+
+						if [ "$?" != "0" ] ; then
+							output="CRITICAL - Problem no RAID Controller Information Returned."
+							intReturn=$STATE_CRITICAL;
+						fi
+						
+						# Read VD count and Read all values in the VD List
+						DGcount[$i]=$(echo "$nDrive" | grep "Physical Drives = " | sed 's/.*Physical Drives = \(.*\).*/\1/' | sed "s/ //g")
+						DGinfo[$i]=$(echo "$cli" | grep "Drive Information :" -A$((${DGcount[$i]}+5)) | tail -n "$((${DGcount[$i]}))" )
+
+						
+						# each RAID table entry provides 14 variables: [EID:Slt, DID, State, DG, Size, Unit, Intf, Med, SED, PI, SeSz, Model, Sp, Type]
+						# in some cases the disk model has a space, which adds an extra entry, hence the separation below to adjust for it. 
+						# Currently two disk models are used in the raid, so we distingush between "TOSHIBA" and other models.
+						j=1
+						for data in ${DGinfo[$i]}; do
+  							DGdata[$i,$j]=$data
+  							j=$(($j+1))
+						done
+						index=0
+						# Convert in Individual Variables
+						for k in `seq 1 ${DGcount[$i]}`; do		
+							if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
+							DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							index=$(($index+15))
+							else	
+							DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							index=$(($index+14))
+							fi
+						done
+					
+				
+						# Create Output
+						# Check all drive status
+						forReturn=$STATE_OK
+						for k in `seq 1 ${DGcount[$i]}`; do
+							case ${DGState[$i,$k]} in
+								Onln)	forReturn=$STATE_OK;			output=$output"Disk ${DGLocation[$i,$k]} status: [Online]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								GHS)	forReturn=$STATE_OK;			output=$output"Disk ${DGLocation[$i,$k]} status: [Global Hotspare]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								DHS)	forReturn=$STATE_OK;			output=$output"Disk ${DGLocation[$i,$k]} status: [Dedicated Hot Spare]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								UGood)	forReturn=$STATE_OK;			output=$output"Disk ${DGLocation[$i,$k]} status: [Unconfigured Good]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								Cpybck)	forReturn=$STATE_WARNING;		output=$output"Disk ${DGLocation[$i,$k]} status: [CopyBack]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								UBad)	forReturn=$STATE_CRITICAL;		output=$output"Disk ${DGLocation[$i,$k]} status: [Unconfigured Bad]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								Offln)	forReturn=$STATE_CRITICAL;		output=$output"Disk ${DGLocation[$i,$k]} status: [Offline]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								*)		forReturn=$STATE_CRITICAL;		output=$output"Disk ${DGLocation[$i,$k]} status: [UNKNOWN]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+							esac
+							if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_WARNING;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+						done
+					done
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				else
+					output=${output:0:${#output}-2}
+				fi
+			fi
+		;;	
+
+
+		disk_s)
+			# Check Individual Disks
+			cli=`$SU $STORCLI $CMD_ctlcount 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem no RAID Controller Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				ctlcount=$(echo "$cli" | grep "Controller Count" | sed 's/.*Controller Count = \(.*\).*/\1/')
+				# Query raid controller information
+				if [ "$ctlcount" != "" ] ; then
+					forReturn=$STATE_OK
+					for i in `seq 1 $ctlcount`; do
+					
+						CMD_DISK=" /c$(($i-1)) $CMD_disk " 
+						CMD_NDRIVE=" /c$(($i-1)) $CMD_all "
+						cli=`$SU $STORCLI $CMD_DISK 2> /dev/null`
+						nDrive=`$SU $STORCLI $CMD_NDRIVE 2> /dev/null`
+
+						if [ "$?" != "0" ] ; then
+							output="CRITICAL - Problem no RAID Controller Information Returned."
+							intReturn=$STATE_CRITICAL;
+						fi
+						
+						# Read VD count and Read all values in the VD List	
+						DGcount[$i]=$(echo "$nDrive" | grep "Physical Drives = " | sed 's/.*Physical Drives = \(.*\).*/\1/' | sed "s/ //g")
+						DGinfo[$i]=$(echo "$cli" | grep "Drive Information :" -A$((${DGcount[$i]}+5)) | tail -n "$((${DGcount[$i]}))" )
+
+
+						# each RAID table entry provides 14 variables: [EID:Slt, DID, State, DG, Size, Unit, Intf, Med, SED, PI, SeSz, Model, Sp, Type]
+						# in some cases the disk model has a space, which adds an extra entry, hence the separation below to adjust for it. 
+						# Currently two disk models are used in the raid, so we distingush between "TOSHIBA" and other models.
+						j=1
+						for data in ${DGinfo[$i]}; do
+  							DGdata[$i,$j]=$data
+  							j=$(($j+1))
+						done
+						index=0
+						# Convert in Individual Variables
+						for k in `seq 1 ${DGcount[$i]}`; do		
+							if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
+							DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							index=$(($index+15))
+							else	
+							DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							index=$(($index+14))
+							fi
+						done
+					
+					
+						# Create Output
+						# Check all drive status
+						forReturn=$STATE_OK
+						for k in `seq 1 ${DGcount[$i]}`; do
+							case ${DGState[$i,$k]} in
+								Onln)	forReturn=$STATE_OK;;
+								GHS)	forReturn=$STATE_OK;;
+								DHS)	forReturn=$STATE_OK;;
+								UGood)	forReturn=$STATE_OK;;
+								Cpybck)	forReturn=$STATE_WARNING;		output=$output"Disk ${DGLocation[$i,$k]} status: [CopyBack]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								UBad)	forReturn=$STATE_CRITICAL;		output=$output"Disk ${DGLocation[$i,$k]} status: [Unconfigured Bad]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								Offln)	forReturn=$STATE_CRITICAL;		output=$output"Disk ${DGLocation[$i,$k]} status: [Offline]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+								*)		forReturn=$STATE_CRITICAL;		output=$output"Disk ${DGLocation[$i,$k]} status: [UNKNOWN]  -  Size: ${DGSize[$i,$k]}${DGUnit[$i,$k]}  -  Type: ${DGType[$i,$k]}\n";;
+							esac
+							if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_WARNING;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+						done
+						DGTotal=$((DGTotal + DGCount[$i]))
+					done
+					if [ "$intReturn" == "$STATE_OK" ] ; then						
+						output="Number of Disks: ${DGcount[$i]}  -  Status: [OK]\n"
+					fi
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				else
+					output=${output:0:${#output}-2}
+				fi
+			fi
+		;;	
+
+
+
+		ctl)
+			# Check Raid Controller Status
+			cli=`$SU $STORCLI $CMD_ctlcount 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem no RAID Controller Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				ctlcount=$(echo "$cli" | grep "Controller Count" | sed 's/.*Controller Count = \(.*\).*/\1/')
+				# Query raid controller information
+				if [ "$ctlcount" != "" ] ; then
+					forReturn=$STATE_OK
+					for i in `seq 1 $ctlcount`; do
+					
+						CMD_tmp=" /c$(($i-1)) $CMD_all " 
+						cli=`$SU $STORCLI $CMD_tmp 2> /dev/null`
+					
+						if [ "$?" != "0" ] ; then
+							output="CRITICAL - Problem no RAID Controller Information Returned."
+							intReturn=$STATE_CRITICAL;
+						fi
+						CTLState[$i]=$(echo "$cli" | grep "Controller Status = " | sed 's/.*Controller Status = \(.*\).*/\1/')
+					done
+					
+					# Create Output
+					# Check all RAID Controller Status
+					for i in `seq 1 $ctlcount`; do
+					output=$output"RAID Controller $(($i-1)) Status: "${CTLState[$i]}"\n"
+					if [ "${CTLState[$i]}" != "Optimal" ] ; then 
+						forReturn=$STATE_CRITICAL
+					fi				
+
+					#Set intReturn based on values returned from Battery check
+					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_WARNING;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+					done
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				else
+					output=${output:0:${#output}-2}
+				fi
+			fi
+		;;
+
+		*)
+			usage; exit 0
+		;;
+
+	esac
+
+	echo -e $output
+	exit $intReturn
+fi
+
