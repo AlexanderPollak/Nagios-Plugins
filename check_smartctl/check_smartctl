@@ -1,0 +1,408 @@
+#!/bin/bash
+
+##
+#
+# Check Disk Health information with smartctl
+#
+# Requires smartctl to be installed
+#
+#
+# Usage:
+#	./check_smartctl -s STATUSCHECK -p PATH
+#
+#
+# Tested with smartctl 7.1 2019-12-30
+#---------------------------------------------------
+#
+# 2023-07-23:  Version 1.0	\\ Alexander Pollak
+#
+##
+
+ 
+SMARTCTL="/usr/sbin/smartctl"
+#SMARTCTL=$(which smartctl)
+SU="sudo"
+
+# Query Commands for smartctl
+# smartctl  --scan
+# smartctl -a -d megaraid,12 /dev/bus/0
+
+# Default Values for Warning and Critical Checks:
+Reallocated_Sector_Ct_Warning="1"
+Reallocated_Sector_Ct_Critical="10"
+
+
+# nagios return values
+export STATE_OK=0
+export STATE_WARNING=1
+export STATE_CRITICAL=2
+export STATE_UNKNOWN=3
+export STATE_DEPENDENT=4
+
+intReturn=$STATE_OK
+
+usage()
+{
+        echo "usage: ./check_smartctl -s [check]"
+        echo "options:"
+        echo ""
+        echo "	-p  [path]            Specifies the path to smartctl, default [$SMARTCTL]"
+        echo "	-s  [check]           Check to be executed"
+        echo "	    health_l          Check disk health data, individual disks" 
+        echo "	    health_s          Check disk health data, summary"
+		echo ""
+        echo "	-w [warning]         Warning count for Reallocated Sectors (default $Reallocated_Sector_Ct_Warning)"
+        echo "	-c [critical]        Critical count for Reallocated Sectors (default $Reallocated_Sector_Ct_Critical)"
+        echo ""
+        echo "Note the script needs to be exectuted as sudo in order for smartctl to access disk info."
+        echo ""
+        echo "examples:	./check_smartctl -s health_s"	
+        echo "	     	./check_smartctl -s health_s -p /usr/sbin/smartctl"	
+        exit 3
+}
+
+
+
+if [ "$1" == "--help" ]; then
+    usage; exit 0
+fi
+
+while getopts p:s:w:c: OPTNAME; do
+	case "$OPTNAME" in
+	s)	status="$OPTARG";;
+	p)	SMARTCTL="$OPTARG";;
+	w)	Reallocated_Sector_Ct_Warning="$OPTARG";;
+	c)	Reallocated_Sector_Ct_Critical="$OPTARG";;
+	*)	usage;;
+        esac
+done
+
+
+
+
+
+if [ "$status" = "" ] ; then
+	usage
+else
+	if [ "$SMARTCTL" = "" ] ; then
+		echo "Cannot find smartctl. Please install it."
+		exit 1
+	fi
+	case "$status" in
+
+		health_l)
+			# Check Health of Individual Disks
+#			smart=`cat smart-scan.txt 2> /dev/null`
+			smart=`$SU $SMARTCTL "--scan" 2> /dev/null`	
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem Smartctl Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				# get information list of mDisks
+				mDisk=$(echo "$smart" | grep "/dev/s")
+				mCount=$(echo "$smart" | grep "/dev/s" | wc -l)
+
+				j=1
+				for data in $mDisk; do
+  					mData[$j]=$data
+  					j=$(($j+1))
+				done
+				
+
+				# Extract mount path "/dev/sda, etc."
+				index=0
+				for i in `seq 1 $mCount`; do		
+					mPath[$i]=${mData[(1 + $index)]}
+					index=$(($index+7))
+				done
+
+				# get information list of rDisks
+				rDisk=$(echo "$smart" | grep "megaraid")
+				rCount=$(echo "$smart" | grep "megaraid" | wc -l)
+
+				if [ "$rCount" -ge "1" ] ; then
+					j=1
+					for data in $rDisk; do
+  						rData[$j]=$data
+  						j=$(($j+1))
+					done
+					index=0
+					# Extract mount path "/dev/sda, etc."
+					for i in `seq 1 $rCount`; do		
+						rPath[$i]=${rData[(1 + $index)]}
+						rIndex[$i]=${rData[(3 + $index)]}
+						index=$(($index+8))
+					done
+				fi
+
+
+				#Check disks smartctl return and distinguish between mounted RAIDs and physical disks.
+				for i in `seq 1 $mCount`; do
+					CMD_mDisk="--all ${mPath[$i]}" 
+					smart=`$SU $SMARTCTL $CMD_mDisk 2> /dev/null`
+
+					mModel=$(echo "$smart" | grep "=== START OF INFORMATION SECTION ===" -A1 | grep "Device Model:" | sed 's/.*Device Model:\(.*\).*/\1/' | sed "s/ //g")
+					# Check for physical disk or mounted VD Raid
+					forReturn=$STATE_OK
+					if [ "$mModel" != "" ] ; then
+
+						mSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+						mRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
+						#extrct RSC count
+						j=1
+						for data in $mRSC; do
+  							mRSCdata[$j]=$data
+  							j=$(($j+1))
+						done
+						mRSCcount=${mRSCdata[10]}
+						
+						# Create Output
+						# Check all drive health status
+						case $mSmart in
+							PASSED)	
+								if [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Warning" ] ; then
+									forReturn=$STATE_OK
+									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  -  Reallocated Sector Count: $mRSCcount\n"
+								fi		
+								if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
+									forReturn=$STATE_WARNING
+									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $mRSCcount\n"
+								fi	
+								if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
+									forReturn=$STATE_CRITICAL
+									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $mRSCcount\n"
+								fi	
+							;;
+								
+							*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${mPath[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $mRSCcount\n";;
+						esac
+					fi
+					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_WARNING;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+				done
+
+				#Check disks smartctl for RAID mounted disks.
+				for i in `seq 1 $rCount`; do
+					
+					CMD_rDisk="-a -d ${rIndex[$i]} ${rPath[$i]}" 
+					smart=`$SU $SMARTCTL $CMD_rDisk 2> /dev/null`
+
+					rSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+					rRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
+					#extrct RSC count
+					j=1
+					for data in $mRSC; do
+  						rRSCdata[$j]=$data
+  						j=$(($j+1))
+					done
+					rRSCcount=${rRSCdata[10]}	
+
+					# Create Output
+					# Check all drive health status
+					forReturn=$STATE_OK
+					case $rSmart in
+						PASSED)	
+							if [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Warning" ] ; then
+								forReturn=$STATE_OK
+								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  -  Reallocated Sector Count: $rRSCcount\n"
+							fi		
+							if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
+								forReturn=$STATE_WARNING
+								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $rRSCcount\n"
+							fi	
+							if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
+								forReturn=$STATE_CRITICAL
+								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $rRSCcount\n"
+							fi	
+						;;
+						
+						*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${rIndex[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $rRSCcount\n";;
+					esac
+					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_WARNING;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+				done
+	
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				else
+					output=${output:0:${#output}-2}
+				fi
+			fi	
+		;;
+
+
+		health_s)
+			# Check Health of Individual Disks
+			smart=`$SU $SMARTCTL "--scan" 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem Smartctl Information Returned."
+				intReturn=$STATE_CRITICAL;
+			else	
+				# get information list of mDisks
+				mDisk=$(echo "$smart" | grep "/dev/s")
+				mCount=$(echo "$smart" | grep "/dev/s" | wc -l)
+				j=1
+				for data in $mDisk; do
+  					mData[$j]=$data
+  					j=$(($j+1))
+				done
+				index=0
+				# Extract mount path "/dev/sda, etc."
+				for i in `seq 1 $mCount`; do		
+					mPath[$i]=${mData[(1 + $index)]}
+					index=$(($index+7))
+				done
+
+				# get information list of rDisks
+				rDisk=$(echo "$smart" | grep "megaraid")
+				rCount=$(echo "$smart" | grep "megaraid" | wc -l)
+				
+				if [ "$rCount" -ge "1" ] ; then
+					j=1
+					for data in $rDisk; do
+  						rData[$j]=$data
+  						j=$(($j+1))
+					done
+					index=0
+					# Extract mount path "/dev/sda, etc."
+					for i in `seq 1 $rCount`; do		
+						rPath[$i]=${rData[(1 + $index)]}
+						rIndex[$i]=${rData[(3 + $index)]}
+						index=$(($index+8))
+					done
+				fi
+
+
+				#Check disks smartctl return and distinguish between mounted RAIDs and physical disks.
+				for i in `seq 1 $mCount`; do
+					CMD_mDisk="--all ${mPath[$i]}" 
+					smart=`$SU $SMARTCTL $CMD_mDisk 2> /dev/null`
+
+					mModel=$(echo "$smart" | grep "=== START OF INFORMATION SECTION ===" -A1 | grep "Device Model:" | sed 's/.*Device Model:\(.*\).*/\1/' | sed "s/ //g")
+
+					# Check for physical disk or mounted VD Raid
+					forReturn=$STATE_OK
+					if [ "$mModel" != "" ] ; then
+
+						mSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+						mRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
+						#extrct RSC count
+						j=1
+						for data in $mRSC; do
+  							mRSCdata[$j]=$data
+  							j=$(($j+1))
+						done
+						mRSCcount=${mRSCdata[10]}
+
+
+						# Create Output
+						# Check all drive health status
+						case $mSmart in
+							PASSED)		
+								if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
+									forReturn=$STATE_WARNING
+									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $mRSCcount\n"
+								fi	
+								if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
+									forReturn=$STATE_CRITICAL
+									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $mRSCcount\n"
+								fi	
+							;;
+								
+							*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${mPath[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $mRSCcount\n";;
+						esac
+					DGTotal=$((DGTotal + 1))
+					fi
+					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_WARNING;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+				done
+
+				#Check disks smartctl for RAID mounted disks.
+				for i in `seq 1 $rCount`; do
+					CMD_rDisk="-a -d ${rIndex[$i]} ${rPath[$i]}" 
+					smart=`$SU $SMARTCTL $CMD_rDisk 2> /dev/null`
+
+					rSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+					rRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
+					#extrct RSC count
+					j=1
+					for data in $mRSC; do
+  						rRSCdata[$j]=$data
+  						j=$(($j+1))
+					done
+					rRSCcount=${rRSCdata[10]}	
+
+					# Create Output
+					# Check all drive health status
+					forReturn=$STATE_OK
+					case $rSmart in
+						PASSED)		
+							if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
+								forReturn=$STATE_WARNING
+								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $rRSCcount\n"
+							fi	
+							if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
+								forReturn=$STATE_CRITICAL
+								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $rRSCcount\n"
+							fi	
+						;;
+						
+						*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${rIndex[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $rRSCcount\n";;
+					esac
+					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_WARNING;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+				done
+				
+				DGTotal=$((DGTotal + rCount))
+				if [ "$intReturn" == "$STATE_OK" ] ; then						
+					output="Number of Disks: $DGTotal  -  SMART Status: [PASSED]\n"
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				else
+					output=${output:0:${#output}-2}
+				fi
+			fi	
+		;;
+
+
+		*)
+			usage; exit 0
+		;;
+
+	esac
+
+	echo -e $output
+	exit $intReturn
+fi
+

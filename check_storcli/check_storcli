@@ -15,7 +15,7 @@
 # Tested with AVAGO 3108 MegaRAID / PERC H330 Mini
 #---------------------------------------------------
 #
-# 2023-07-13:  Version 1.0	\\ Alexander Pollak
+# 2023-07-13:  Version 1.1	\\ Alexander Pollak
 #
 ##
 
@@ -358,7 +358,7 @@ else
 					done
 					
 					if [ "$intReturn" == "$STATE_OK" ] ; then						
-						output="Number of RAIDs: ${VDcount[$i]}  -  Status: [Optimal]  -  Consistent: [Yes] \n"
+						output="Number of RAIDs: $VDTotal  -  Status: [Optimal]  -  Consistent: [Yes] \n"
 					fi
 
 				fi
@@ -549,7 +549,7 @@ else
 						DGTotal=$((DGTotal + DGCount[$i]))
 					done
 					if [ "$intReturn" == "$STATE_OK" ] ; then						
-						output="Number of Disks: ${DGcount[$i]}  -  Status: [OK]\n"
+						output="Number of Disks: $DGTotal  -  Status: [OK]\n"
 					fi
 				fi
 				if [ "$output" == "" ] ; then
