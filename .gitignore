@@ -1,8 +1,20 @@
-
+# Default ignored files
+/shelf/
+/workspace.xml
 .DS_Store
-check_mitsubishi_ups/.idea/vcs.xml
-check_mitsubishi_ups/.idea/modules.xml
-check_mitsubishi_ups/.idea/misc.xml
-check_mitsubishi_ups/.idea/inspectionProfiles/profiles_settings.xml
-check_mitsubishi_ups/.idea/check_apc_ap8941.iml
-check_mitsubishi_ups/.idea/workspace.xml
+.gitignore
+/check_smartctl/.idea/
+/check_smartctl/.DS_Store
+/check_storcli/.idea/
+/check_storcli/.DS_Store
+/check_liebert_hvac/.idea/
+/check_liebert_hvac/.DS_Store
+/check_mitsubishi_ups/.idea/
+/check_mitsubishi_ups/.DS_Store
+/check_roomalert_12S/.idea/
+/check_roomalert_12S/.DS_Store
+/check_synology/.idea/
+/check_synology/.DS_Store
+/check_apc_pdu/.idea/
+/check_apc_pdu/.DS_Store
+
