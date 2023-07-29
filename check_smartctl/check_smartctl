@@ -14,7 +14,7 @@
 # Tested with smartctl 7.1 2019-12-30
 #---------------------------------------------------
 #
-# 2023-07-23:  Version 1.0	\\ Alexander Pollak
+# 2023-07-23:  Version 1.1	\\ Alexander Pollak
 #
 ##
 
@@ -196,13 +196,14 @@ else
 
 					rSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
 					rRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
-					#extrct RSC count
+					#extract RSC count
+					
 					j=1
-					for data in $mRSC; do
+					for data in $rRSC; do
   						rRSCdata[$j]=$data
   						j=$(($j+1))
 					done
-					rRSCcount=${rRSCdata[10]}	
+					rRSCcount=${rRSCdata[10]}
 
 					# Create Output
 					# Check all drive health status
@@ -348,7 +349,7 @@ else
 					rRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
 					#extrct RSC count
 					j=1
-					for data in $mRSC; do
+					for data in $rRSC; do
   						rRSCdata[$j]=$data
   						j=$(($j+1))
 					done
