@@ -14,7 +14,7 @@
 # Tested with smartctl 7.1 2019-12-30
 #---------------------------------------------------
 #
-# 2023-07-23:  Version 1.1	\\ Alexander Pollak
+# 2023-07-23:  Version 1.3	\\ Alexander Pollak
 #
 ##
 
@@ -30,7 +30,8 @@ SU="sudo"
 # Default Values for Warning and Critical Checks:
 Reallocated_Sector_Ct_Warning="1"
 Reallocated_Sector_Ct_Critical="10"
-
+Percentage_Used_Warning="90"
+Percentage_Used_Critical="95"
 
 # nagios return values
 export STATE_OK=0
@@ -51,8 +52,10 @@ usage()
         echo "	    health_l          Check disk health data, individual disks" 
         echo "	    health_s          Check disk health data, summary"
 		echo ""
-        echo "	-w [warning]         Warning count for Reallocated Sectors (default $Reallocated_Sector_Ct_Warning)"
-        echo "	-c [critical]        Critical count for Reallocated Sectors (default $Reallocated_Sector_Ct_Critical)"
+        echo "	-w [warning]         Warning count for Reallocated Sectors (default "$Reallocated_Sector_Ct_Warning")"
+        echo "	-c [critical]        Critical count for Reallocated Sectors (default "$Reallocated_Sector_Ct_Critical")"
+        echo "	-W [warning]         Warning percentage used for NVMe (default "$Percentage_Used_Warning"%)"
+        echo "	-C [critical]        Critical percentage used for NVMe (default "$Percentage_Used_Critical"%)"
         echo ""
         echo "Note the script needs to be exectuted as sudo in order for smartctl to access disk info."
         echo ""
@@ -67,12 +70,14 @@ if [ "$1" == "--help" ]; then
     usage; exit 0
 fi
 
-while getopts p:s:w:c: OPTNAME; do
+while getopts p:s:w:c:W:C: OPTNAME; do
 	case "$OPTNAME" in
 	s)	status="$OPTARG";;
 	p)	SMARTCTL="$OPTARG";;
 	w)	Reallocated_Sector_Ct_Warning="$OPTARG";;
 	c)	Reallocated_Sector_Ct_Critical="$OPTARG";;
+	W)	Percentage_Used_Warning="$OPTARG";;
+	C)	Percentage_Used_Critical="$OPTARG";;
 	*)	usage;;
         esac
 done
@@ -98,10 +103,10 @@ else
 				output="CRITICAL - Problem Smartctl Information Returned."
 				intReturn=$STATE_CRITICAL;
 			else	
+				
 				# get information list of mDisks
 				mDisk=$(echo "$smart" | grep "/dev/s")
 				mCount=$(echo "$smart" | grep "/dev/s" | wc -l)
-
 				j=1
 				for data in $mDisk; do
   					mData[$j]=$data
@@ -119,7 +124,6 @@ else
 				# get information list of rDisks
 				rDisk=$(echo "$smart" | grep "megaraid")
 				rCount=$(echo "$smart" | grep "megaraid" | wc -l)
-
 				if [ "$rCount" -ge "1" ] ; then
 					j=1
 					for data in $rDisk; do
@@ -136,57 +140,128 @@ else
 				fi
 
 
+				# get information list of nNVMe
+				nNVMe=$(echo "$smart" | grep "/dev/nvme")
+				nCount=$(echo "$smart" | grep "/dev/nvme" | wc -l)
+				if [ "$nCount" -ge "1" ] ; then
+					j=1
+					for data in $nNVMe; do
+  						nData[$j]=$data
+  						j=$(($j+1))
+					done
+					index=0
+					# Extract mount path "/dev/sda, etc."
+					for i in `seq 1 $nCount`; do		
+						nPath[$i]=${nData[(1 + $index)]}
+						index=$(($index+7))
+					done
+				fi
+
+
+
 				#Check disks smartctl return and distinguish between mounted RAIDs and physical disks.
 				for i in `seq 1 $mCount`; do
 					CMD_mDisk="--all ${mPath[$i]}" 
 					smart=`$SU $SMARTCTL $CMD_mDisk 2> /dev/null`
 
-					mModel=$(echo "$smart" | grep "=== START OF INFORMATION SECTION ===" -A1 | grep "Device Model:" | sed 's/.*Device Model:\(.*\).*/\1/' | sed "s/ //g")
 					# Check for physical disk or mounted VD Raid
+					mModel=$(echo "$smart" | grep "=== START OF INFORMATION SECTION ===" -A2 | grep "Device Model:" | sed 's/.*Device Model:\(.*\).*/\1/' | sed "s/ //g")
 					forReturn=$STATE_OK
 					if [ "$mModel" != "" ] ; then
 
-						mSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
-						mRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
-						#extrct RSC count
-						j=1
-						for data in $mRSC; do
-  							mRSCdata[$j]=$data
-  							j=$(($j+1))
-						done
-						mRSCcount=${mRSCdata[10]}
-						
-						# Create Output
-						# Check all drive health status
-						case $mSmart in
-							PASSED)	
-								if [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Warning" ] ; then
-									forReturn=$STATE_OK
-									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  -  Reallocated Sector Count: $mRSCcount\n"
-								fi		
-								if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
-									forReturn=$STATE_WARNING
-									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $mRSCcount\n"
-								fi	
-								if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
-									forReturn=$STATE_CRITICAL
-									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $mRSCcount\n"
-								fi	
-							;;
+					
+
+						# distinguish between NVMe and other disks in hardware RAID
+						isNVMe=$(echo "$smart" | grep "SMART/Health Information" | grep "NVMe")
+						if [ "$isNVMe" != "" ] ; then
+
+
+							nSmart=$(echo "$smart" | grep "=== START OF SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+							nUsed=$(echo "$smart" | grep "Percentage Used:" | sed 's/.*Percentage Used: \(.*\)%.*/\1/' | sed "s/ //g")
+
+							# Create Output
+							# Check all drive health status
+							forReturn=$STATE_OK
+							case $nSmart in
+								PASSED)	
+									if [ "$nUsed" -le "$Percentage_Used_Warning" ] ; then
+										forReturn=$STATE_OK
+										output=$output"NVMe ${rIndex[$i]} smartctl status: [PASSED]  -  Percentage used endurance indicator: "$nUsed"%\n"
+									fi		
+									if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -le "$Percentage_Used_Critical" ] ; then
+										forReturn=$STATE_WARNING
+										output=$output"NVMe ${rIndex[$i]} smartctl status: [PASSED]  - WARNING: Percentage used endurance indicator: "$nUsed"%\n"
+									fi	
+									if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -gt "$Percentage_Used_Critical" ] ; then
+										forReturn=$STATE_CRITICAL
+										output=$output"NVMe ${rIndex[$i]} smartctl status: [PASSED]  - CRITICAL: Percentage used endurance indicator: "$nUsed"%\n"
+									fi	
+								;;
+							
+								*)		forReturn=$STATE_CRITICAL;	output=$output"NVMe ${rIndex[$i]} smartctl status: [FAILED]  -  Percentage used endurance indicator: "$nUsed"%\n";;
+							esac
+							if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_WARNING;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi
+
+
+
+
+
+						# Logic for non NVMe disks
+						else
+							mSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+							mRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
+							#extract RSC count
+							j=1
+							for data in $mRSC; do
+  								mRSCdata[$j]=$data
+  								j=$(($j+1))
+							done
+							mRSCcount=${mRSCdata[10]}
+							
+							# Create Output
+							# Check all drive health status
+							case $mSmart in
+								PASSED)	
+									if [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Warning" ] ; then
+										forReturn=$STATE_OK
+										output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  -  Reallocated Sector Count: $mRSCcount\n"
+									fi		
+									if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
+										forReturn=$STATE_WARNING
+										output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $mRSCcount\n"
+									fi	
+									if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
+										forReturn=$STATE_CRITICAL
+										output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $mRSCcount\n"
+									fi	
+								;;
 								
-							*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${mPath[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $mRSCcount\n";;
-						esac
+								*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${mPath[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $mRSCcount\n";;
+							esac
+							if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_WARNING;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+						fi
 					fi
-					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
-						intReturn=$STATE_WARNING;
-					fi	
-					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
-						intReturn=$STATE_CRITICAL;
-					fi	
-					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
-						intReturn=$STATE_CRITICAL;
-					fi	
 				done
+
+
+
+
 
 				#Check disks smartctl for RAID mounted disks.
 				for i in `seq 1 $rCount`; do
@@ -194,49 +269,139 @@ else
 					CMD_rDisk="-a -d ${rIndex[$i]} ${rPath[$i]}" 
 					smart=`$SU $SMARTCTL $CMD_rDisk 2> /dev/null`
 
-					rSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
-					rRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
-					#extract RSC count
 					
-					j=1
-					for data in $rRSC; do
-  						rRSCdata[$j]=$data
-  						j=$(($j+1))
-					done
-					rRSCcount=${rRSCdata[10]}
+					# distinguish between NVMe and other disks in hardware RAID
+					isNVMe=$(echo "$smart" | grep "=== START OF INFORMATION SECTION ===" -A2 | grep "Vendor:" | sed 's/.*Vendor:\(.*\).*/\1/' | sed "s/ //g")
+					if [ "$isNVMe" == "NVMe" ] ; then
 
-					# Create Output
-					# Check all drive health status
-					forReturn=$STATE_OK
-					case $rSmart in
-						PASSED)	
-							if [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Warning" ] ; then
-								forReturn=$STATE_OK
-								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  -  Reallocated Sector Count: $rRSCcount\n"
-							fi		
-							if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
-								forReturn=$STATE_WARNING
-								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $rRSCcount\n"
-							fi	
-							if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
-								forReturn=$STATE_CRITICAL
-								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $rRSCcount\n"
-							fi	
-						;;
+						nSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART Health Status:" | sed 's/.*SMART Health Status:\(.*\).*/\1/' | sed "s/ //g")
+						nUsed=$(echo "$smart" | grep "Percentage used endurance indicator:" | sed 's/.*Percentage used endurance indicator: \(.*\)%.*/\1/')
+
+						# Create Output
+						# Check all drive health status
+						forReturn=$STATE_OK
+						case $nSmart in
+							OK)	
+								if [ "$nUsed" -le "$Percentage_Used_Warning" ] ; then
+									forReturn=$STATE_OK
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  -  Percentage used endurance indicator: "$nUsed"%\n"
+								fi		
+								if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -le "$Percentage_Used_Critical" ] ; then
+									forReturn=$STATE_WARNING
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  - WARNING: Percentage used endurance indicator: "$nUsed"%\n"
+								fi	
+								if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -gt "$Percentage_Used_Critical" ] ; then
+									forReturn=$STATE_CRITICAL
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  - CRITICAL: Percentage used endurance indicator: "$nUsed"%\n"
+								fi	
+							;;
+							
+							*)		forReturn=$STATE_CRITICAL;	output=$output"NVMe ${rIndex[$i]} smartctl status: [FAILED]  -  Percentage used endurance indicator: "$nUsed"%\n";;
+						esac
+						if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_WARNING;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi
+
+
+					# Logic for non NVMe disks
+					else	
 						
-						*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${rIndex[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $rRSCcount\n";;
-					esac
-					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
-						intReturn=$STATE_WARNING;
-					fi	
-					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
-						intReturn=$STATE_CRITICAL;
-					fi	
-					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
-						intReturn=$STATE_CRITICAL;
+						rSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+						rRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
+						
+						#extract RSC count
+						j=1
+						for data in $rRSC; do
+  							rRSCdata[$j]=$data
+  							j=$(($j+1))
+						done
+						rRSCcount=${rRSCdata[10]}
+
+						# Create Output
+						# Check all drive health status
+						forReturn=$STATE_OK
+						case $rSmart in
+							PASSED)	
+								if [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Warning" ] ; then
+									forReturn=$STATE_OK
+									output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  -  Reallocated Sector Count: $rRSCcount\n"
+								fi		
+								if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
+									forReturn=$STATE_WARNING
+									output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $rRSCcount\n"
+								fi	
+								if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
+									forReturn=$STATE_CRITICAL
+									output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $rRSCcount\n"
+								fi	
+							;;
+							
+							*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${rIndex[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $rRSCcount\n";;
+						esac
+						if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_WARNING;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi
 					fi	
 				done
-	
+
+
+
+				#Check local NVMe disks smartctl.
+				if [ "$nCount" != "" ] ; then
+				
+					for i in `seq 1 $nCount`; do
+						
+						CMD_nDisk="-a ${nPath[$i]}" 
+						smart=`$SU $SMARTCTL $CMD_nDisk 2> /dev/null`
+
+						nSmart=$(echo "$smart" | grep "=== START OF SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+						nUsed=$(echo "$smart" | grep "Percentage Used:" | sed 's/.*Percentage Used: \(.*\)%.*/\1/' | sed "s/ //g")
+						
+						# Create Output
+						# Check all drive health status
+						forReturn=$STATE_OK
+						case $nSmart in
+							PASSED)	
+								if [ "$nUsed" -le "$Percentage_Used_Warning" ] ; then
+									forReturn=$STATE_OK
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  -  Percentage used endurance indicator: "$nUsed"%\n"
+								fi		
+								if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -le "$Percentage_Used_Critical" ] ; then
+									forReturn=$STATE_WARNING
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  - WARNING: Percentage used endurance indicator: "$nUsed"%\n"
+								fi	
+								if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -gt "$Percentage_Used_Critical" ] ; then
+									forReturn=$STATE_CRITICAL
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  - CRITICAL: Percentage used endurance indicator: "$nUsed"%\n"
+								fi	
+							;;
+							
+							*)		forReturn=$STATE_CRITICAL;	output=$output"NVMe ${rIndex[$i]} smartctl status: [FAILED]  -  Percentage used endurance indicator: "$nUsed"%\n";;
+						esac
+						if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_WARNING;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi
+					done
+				fi
+
 				if [ "$output" == "" ] ; then
 					output="No information returned"
 					intReturn=$STATE_WARNING
@@ -289,101 +454,252 @@ else
 				fi
 
 
+				# get information list of nNVMe
+				nNVMe=$(echo "$smart" | grep "/dev/nvme")
+				nCount=$(echo "$smart" | grep "/dev/nvme" | wc -l)
+				if [ "$nCount" -ge "1" ] ; then
+					j=1
+					for data in $nNVMe; do
+  						nData[$j]=$data
+  						j=$(($j+1))
+					done
+					index=0
+					# Extract mount path "/dev/sda, etc."
+					for i in `seq 1 $nCount`; do		
+						nPath[$i]=${nData[(1 + $index)]}
+						index=$(($index+7))
+					done
+				fi
+
+
+
 				#Check disks smartctl return and distinguish between mounted RAIDs and physical disks.
 				for i in `seq 1 $mCount`; do
 					CMD_mDisk="--all ${mPath[$i]}" 
 					smart=`$SU $SMARTCTL $CMD_mDisk 2> /dev/null`
 
-					mModel=$(echo "$smart" | grep "=== START OF INFORMATION SECTION ===" -A1 | grep "Device Model:" | sed 's/.*Device Model:\(.*\).*/\1/' | sed "s/ //g")
+					mModel=$(echo "$smart" | grep "=== START OF INFORMATION SECTION ===" -A2 | grep "Device Model:" | sed 's/.*Device Model:\(.*\).*/\1/' | sed "s/ //g")
 
 					# Check for physical disk or mounted VD Raid
 					forReturn=$STATE_OK
 					if [ "$mModel" != "" ] ; then
 
-						mSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
-						mRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
-						#extrct RSC count
-						j=1
-						for data in $mRSC; do
-  							mRSCdata[$j]=$data
-  							j=$(($j+1))
-						done
-						mRSCcount=${mRSCdata[10]}
+
+						# distinguish between NVMe and other disks in hardware RAID
+						isNVMe=$(echo "$smart" | grep "SMART/Health Information" | grep "NVMe")
+						if [ "$isNVMe" != "" ] ; then
 
 
-						# Create Output
-						# Check all drive health status
-						case $mSmart in
-							PASSED)		
-								if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
-									forReturn=$STATE_WARNING
-									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $mRSCcount\n"
-								fi	
-								if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
-									forReturn=$STATE_CRITICAL
-									output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $mRSCcount\n"
-								fi	
-							;;
+							nSmart=$(echo "$smart" | grep "=== START OF SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+							nUsed=$(echo "$smart" | grep "Percentage Used:" | sed 's/.*Percentage Used: \(.*\)%.*/\1/' | sed "s/ //g")
+
+							# Create Output
+							# Check all drive health status
+							forReturn=$STATE_OK
+							case $nSmart in
+								PASSED)	
+									if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -le "$Percentage_Used_Critical" ] ; then
+										forReturn=$STATE_WARNING
+										output=$output"NVMe ${rIndex[$i]} smartctl status: [PASSED]  - WARNING: Percentage used endurance indicator: "$nUsed"%\n"
+									fi	
+									if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -gt "$Percentage_Used_Critical" ] ; then
+										forReturn=$STATE_CRITICAL
+										output=$output"NVMe ${rIndex[$i]} smartctl status: [PASSED]  - CRITICAL: Percentage used endurance indicator: "$nUsed"%\n"
+									fi	
+								;;
+							
+								*)		forReturn=$STATE_CRITICAL;	output=$output"NVMe ${rIndex[$i]} smartctl status: [FAILED]  -  Percentage used endurance indicator: "$nUsed"%\n";;
+							esac
+							if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_WARNING;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi
+
+
+
+
+
+						# Logic for non NVMe disks
+						else
+
+							mSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+							mRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
+							#extract RSC count
+							j=1
+							for data in $mRSC; do
+  								mRSCdata[$j]=$data
+  								j=$(($j+1))
+							done
+							mRSCcount=${mRSCdata[10]}
+
+
+							# Create Output
+							# Check all drive health status
+							case $mSmart in
+								PASSED)		
+									if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
+										forReturn=$STATE_WARNING
+										output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $mRSCcount\n"
+									fi	
+									if [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$mRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
+										forReturn=$STATE_CRITICAL
+										output=$output"Disk ${mPath[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $mRSCcount\n"
+									fi	
+								;;
 								
-							*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${mPath[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $mRSCcount\n";;
-						esac
-					DGTotal=$((DGTotal + 1))
+								*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${mPath[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $mRSCcount\n";;
+							esac
+							DGTotal=$((DGTotal + 1))
+		
+							if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_WARNING;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi	
+							if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+								intReturn=$STATE_CRITICAL;
+							fi
+						fi		
 					fi
-					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
-						intReturn=$STATE_WARNING;
-					fi	
-					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
-						intReturn=$STATE_CRITICAL;
-					fi	
-					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
-						intReturn=$STATE_CRITICAL;
-					fi	
 				done
+
+
+
 
 				#Check disks smartctl for RAID mounted disks.
 				for i in `seq 1 $rCount`; do
 					CMD_rDisk="-a -d ${rIndex[$i]} ${rPath[$i]}" 
 					smart=`$SU $SMARTCTL $CMD_rDisk 2> /dev/null`
 
-					rSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
-					rRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
-					#extrct RSC count
-					j=1
-					for data in $rRSC; do
-  						rRSCdata[$j]=$data
-  						j=$(($j+1))
-					done
-					rRSCcount=${rRSCdata[10]}	
 
-					# Create Output
-					# Check all drive health status
-					forReturn=$STATE_OK
-					case $rSmart in
-						PASSED)		
-							if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
-								forReturn=$STATE_WARNING
-								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $rRSCcount\n"
-							fi	
-							if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
-								forReturn=$STATE_CRITICAL
-								output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $rRSCcount\n"
-							fi	
-						;;
-						
-						*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${rIndex[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $rRSCcount\n";;
-					esac
-					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
-						intReturn=$STATE_WARNING;
-					fi	
-					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
-						intReturn=$STATE_CRITICAL;
-					fi	
-					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
-						intReturn=$STATE_CRITICAL;
-					fi	
+					# distinguish between NVMe and other disks in hardware RAID
+					isNVMe=$(echo "$smart" | grep "=== START OF INFORMATION SECTION ===" -A2 | grep "Vendor:" | sed 's/.*Vendor:\(.*\).*/\1/' | sed "s/ //g")
+					if [ "$isNVMe" == "NVMe" ] ; then
+
+						nSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART Health Status:" | sed 's/.*SMART Health Status:\(.*\).*/\1/' | sed "s/ //g")
+						nUsed=$(echo "$smart" | grep "Percentage used endurance indicator:" | sed 's/.*Percentage used endurance indicator: \(.*\)%.*/\1/')
+
+						# Create Output
+						# Check all drive health status
+						forReturn=$STATE_OK
+						case $nSmart in
+							OK)		
+								if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -le "$Percentage_Used_Critical" ] ; then
+									forReturn=$STATE_WARNING
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  - WARNING: Percentage used endurance indicator: "$nUsed"%\n"
+								fi	
+								if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -gt "$Percentage_Used_Critical" ] ; then
+									forReturn=$STATE_CRITICAL
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  - CRITICAL: Percentage used endurance indicator: "$nUsed"%\n"
+								fi	
+							;;
+							
+							*)		forReturn=$STATE_CRITICAL;	output=$output"NVMe ${rIndex[$i]} smartctl status: [FAILED]  -  Percentage used endurance indicator: "$nUsed"%\n";;
+						esac
+						if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_WARNING;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi
+
+					# Logic for non NVMe disks
+					else
+
+						rSmart=$(echo "$smart" | grep "=== START OF READ SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+						rRSC=$(echo "$smart" | grep "Reallocated_Sector_Ct")
+						#extrct RSC count
+						j=1
+						for data in $rRSC; do
+  							rRSCdata[$j]=$data
+  							j=$(($j+1))
+						done
+						rRSCcount=${rRSCdata[10]}	
+
+						# Create Output
+						# Check all drive health status
+						forReturn=$STATE_OK
+						case $rSmart in
+							PASSED)		
+								if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -le "$Reallocated_Sector_Ct_Critical" ] ; then
+									forReturn=$STATE_WARNING
+									output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - WARNING: Reallocated Sector Count: $rRSCcount\n"
+								fi	
+								if [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Warning" ] && [ "$rRSCcount" -gt "$Reallocated_Sector_Ct_Critical" ] ; then
+									forReturn=$STATE_CRITICAL
+									output=$output"Disk ${rIndex[$i]} smartctl status: [PASSED]  - CRITICAL: Reallocated Sector Count: $rRSCcount\n"
+								fi	
+							;;
+							
+							*)		forReturn=$STATE_CRITICAL;	output=$output"Disk ${rIndex[$i]} smartctl status: [FAILED]  -  Reallocated Sector Count: $rRSCcount\n";;
+						esac
+						if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_WARNING;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+					fi
 				done
 				
+
+				#Check local NVMe disks smartctl.
+				if [ "$nCount" != "" ] ; then
+				
+					for i in `seq 1 $nCount`; do
+						
+						CMD_rDisk="-a ${nPath[$i]}" 
+						smart=`$SU $SMARTCTL $CMD_rDisk 2> /dev/null`
+
+						nSmart=$(echo "$smart" | grep "=== START OF SMART DATA SECTION ===" -A2 | grep "SMART overall-health self-assessment test result:" | sed 's/.*SMART overall-health self-assessment test result:\(.*\).*/\1/' | sed "s/ //g")
+						nUsed=$(echo "$smart" | grep "Percentage Used:" | sed 's/.*Percentage Used: \(.*\)%.*/\1/' | sed "s/ //g")
+						
+						# Create Output
+						# Check all drive health status
+						forReturn=$STATE_OK
+						case $nSmart in
+							PASSED)		
+								if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -le "$Percentage_Used_Critical" ] ; then
+									forReturn=$STATE_WARNING
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  - WARNING: Percentage used endurance indicator: "$nUsed"%\n"
+								fi	
+								if [ "$nUsed" -gt "$Percentage_Used_Warning" ] && [ "$nUsed" -gt "$Percentage_Used_Critical" ] ; then
+									forReturn=$STATE_CRITICAL
+									output=$output"NVMe ${rIndex[$i]} smartctl status: [OK]  - CRITICAL: Percentage used endurance indicator: "$nUsed"%\n"
+								fi	
+							;;
+							
+							*)		forReturn=$STATE_CRITICAL;	output=$output"NVMe ${rIndex[$i]} smartctl status: [FAILED]  -  Percentage used endurance indicator: "$nUsed"%\n";;
+						esac
+						if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_WARNING;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi	
+						if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+							intReturn=$STATE_CRITICAL;
+						fi
+					done
+				fi
+
+
+
+
 				DGTotal=$((DGTotal + rCount))
+				DGTotal=$((DGTotal + nCount))
 				if [ "$intReturn" == "$STATE_OK" ] ; then						
 					output="Number of Disks: $DGTotal  -  SMART Status: [PASSED]\n"
 				fi

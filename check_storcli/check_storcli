@@ -546,7 +546,7 @@ else
 								intReturn=$STATE_CRITICAL;
 							fi	
 						done
-						DGTotal=$((DGTotal + DGCount[$i]))
+						DGTotal=$((DGTotal + DGcount[$i]))
 					done
 					if [ "$intReturn" == "$STATE_OK" ] ; then						
 						output="Number of Disks: $DGTotal  -  Status: [OK]\n"

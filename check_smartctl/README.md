@@ -10,7 +10,7 @@ tested with: smartctl 7.1 2019-12-30
 Uses 'smartctl' to aquire SMART information from Disk.:
 # install smartctl package:
 
-apt install smarttools
+apt install smartmontools
 
 
 # This script needs to run as sudo, to enable Nagios NRPE to
@@ -27,11 +27,15 @@ nagios ALL=NOPASSWD: /usr/sbin/smartctl"
 
 # Options:
 ```
--p  [path]            Specifies the path to smartctl, default [/opt/MegaRAID/storcli/storcli64]
+-p  [path]            Specifies the path to smartctl, default [/usr/sbin/smartctl]
 -s  [check]           Check to be executed
-	  
-	  health_l          Check disk health data, individual disks
-	  health_s          Check disk health data, summary
+    health_l          Check disk health data, individual disks
+    health_s          Check disk health data, summary
+
+-w [warning]         Warning count for Reallocated Sectors (default 1)
+-c [critical]        Critical count for Reallocated Sectors (default 10)
+-W [warning]         Warning percentage used for NVMe (default 90%)
+-C [critical]        Critical percentage used for NVMe (default 95%)
 ```
 
 # Examples:
