@@ -15,7 +15,7 @@
 # Tested with AVAGO 3108 MegaRAID / PERC H330 Mini
 #---------------------------------------------------
 #
-# 2023-07-13:  Version 1.1	\\ Alexander Pollak
+# 2023-07-13:  Version 1.2	\\ Alexander Pollak
 #
 ##
 
@@ -354,7 +354,7 @@ else
 								intReturn=$STATE_CRITICAL;
 							fi	
 						done
-					VDTotal=$((VDTotal + VDCount[$i]))
+					VDTotal=$((VDTotal + VDcount[$i]))
 					done
 					
 					if [ "$intReturn" == "$STATE_OK" ] ; then						
