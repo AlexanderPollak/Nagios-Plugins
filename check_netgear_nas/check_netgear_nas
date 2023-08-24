@@ -1,0 +1,467 @@
+#!/bin/bash
+
+##
+#
+# receive status information from Netgear ReadyNAS
+#
+# you can get all snmp-options with:
+#	snmpwalk -m ALL -v 2c -c MYCOMMUNITY MYIPADDRESS  netgear
+#
+# Note that you will need to install the mib "netgear.mib" in order to resolve the requests.
+#
+# Usage:
+#	./check_netgear_nas -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
+#
+#
+# Tested with ReadyNAS 6.10.8
+#---------------------------------------------------
+#
+# 2023-08-23:  Version 1.0	\\ Alexander Pollak
+#
+##
+ 
+SNMPWALK=$(which snmpwalk)
+SNMPGET=$(which snmpget)
+
+SNMPVersion="3"
+SNMPV2Community="public"
+SNMPTimeout="10"
+SNMPPort="161"
+
+
+
+#OID declarations
+OID_ng="netgear"
+OID_software="nasMgrSoftwareVersion.0"
+OID_serialNumber="nasMgrSerialNUM.0"
+
+OID_systemFanStatus="fanStatus.1"
+OID_CPUTemp="temperatureValue.1"
+
+
+OID_diskID="diskID"	
+OID_diskModel="diskModel"
+OID_diskStatus="diskState"
+OID_diskTemp="diskTemperature"
+OID_diskError='ataError'
+
+OID_RAID=""
+OID_RAIDName="volumeName"
+OID_RAIDStatus="volumeStatus"
+OID_RAIDLevel="volumeRAIDLevel"
+
+
+OID_StorageSize="volumeSize.1"
+OID_StorageSizeFree="volumeFreeSpace.1"
+OID_StorageDesc="volumeName.1"
+
+
+
+# Default Values for Warning and Critical Checks:
+warningTemperature="50"
+criticalTemperature="60"
+warningStorage="20"
+criticalStorage="5"
+Reallocated_Sector_Ct_Warning="1"
+Reallocated_Sector_Ct_Critical="10"
+
+
+# nagios return values
+export STATE_OK=0
+export STATE_WARNING=1
+export STATE_CRITICAL=2
+export STATE_UNKNOWN=3
+export STATE_DEPENDENT=4
+
+intReturn=$STATE_OK
+
+usage()
+{
+        echo "usage: ./check_netgear_nas [OPTIONS] -U [user] -P [pass] -h [hostname] -s [check]"
+        echo "options:"
+        echo "	-U [snmp username]     Username for SNMPv3"
+        echo "	-P [snmp password]     Password for SNMPv3"
+        echo ""
+        echo "	-2 [community name]    Use SNMPv2 (no need user/password) & define community name (ex: public)"
+        echo ""
+        echo "	-h [hostname or IP]    Hostname or IP. You can also define a different port"
+        echo "	-p [snmp port]         Port for snmp request (default: 161)"
+        echo ""
+        echo "	-s  [check]           Check to be executed"
+        echo "	    info              Show System Infos"
+        echo "	    disk_status       Check Status for All Disks"  
+        echo "	    disk_temp         Check Temperature for All Disks"        
+        echo "	    raid              Check RAID"
+        echo "	    usage             Check Storage Usage"
+        echo ""
+        echo "	-W [warning temp]      Warning temperature (for disks & synology) (default $warningTemperature)"
+        echo "	-C [critical temp]     Critical temperature (for disks & synology) (default $criticalTemperature)"
+        echo ""
+        echo "	-w [warning %]         Warning storage free space percentage (default $warningStorage)"
+        echo "	-c [critical %]        Critical storage free space percentage (default $criticalStorage)"
+        echo ""
+        echo "	-r [warning count]         Warning count for Reallocated Sectors (default "$Reallocated_Sector_Ct_Warning")"
+        echo "	-l [critical count]        Critical count for Reallocated Sectors (default "$Reallocated_Sector_Ct_Critical")"
+        echo ""
+        echo ""
+        echo "examples:	./check_netgear_nas -u admin -p 1234 -h 10.1.10.70 -s info"	
+        echo "	     	./check_netgear_nas -u admin -p 1234 -h nas.org -s raid "	
+        echo "		./check_netgear_nas -2 public -h 10.1.10.70 -p 5300 -s disk_status"	
+        exit 3
+}
+
+
+
+
+if [ "$1" == "--help" ]; then
+    usage; exit 0
+fi
+
+while getopts 2:W:C:w:c:U:P:h:p:s: OPTNAME; do
+	case "$OPTNAME" in
+	U)	SNMPUser="$OPTARG";;
+	P)	SNMPPassword="$OPTARG";;
+	h)	hostname="$OPTARG";;
+	p)	SNMPPort="$OPTARG";;
+	2)	SNMPVersion="2"
+		SNMPV2Community="$OPTARG";;
+	w)	warningStorage="$OPTARG";;
+	c)	criticalStorage="$OPTARG";;
+	W)	warningTemperature="$OPTARG";;
+	C)	criticalTemperature="$OPTARG";;
+	r)	Reallocated_Sector_Ct_Warning="$OPTARG";;
+	l)	Reallocated_Sector_Ct_Critical="$OPTARG";;
+	s)	status="$OPTARG";;
+	*)	usage;;
+        esac
+done
+
+if [ "$warningTemperature" -gt "$criticalTemperature" ] ; then
+    echo "Critical temperature must be higher than warning temperature"
+    echo "Warning temperature: $warningTemperature"
+    echo "Critical temperature: $criticalTemperature"
+    echo ""
+    echo "For more information:  ./${0##*/} --help" 
+    exit 1 
+fi
+
+if [ "$warningStorage" -gt "$criticalStorage" ] ; then
+    echo "The Critical storage usage percentage  must be higher than the warning storage usage percentage"
+    echo "Warning: $warningStorage"
+    echo "Critical: $criticalStorage"
+    echo ""
+    echo "For more information:  ./${0##*/} --help"
+    exit 1
+fi
+
+
+
+
+
+
+if [ "$hostname" = "" ] || ([ "$SNMPVersion" = "3" ] && [ "$SNMPUser" = "" ]) || ([ "$SNMPVersion" = "3" ] && [ "$SNMPPassword" = "" ]) ; then
+	usage
+else
+	if [ "$SNMPVersion" = "2" ] ; then
+		SNMPArgs=" -v 2c -c $SNMPV2Community -t $SNMPTimeout"
+	else
+		SNMPArgs=" -v 3 -u $SNMPUser -A $SNMPPassword -l authNoPriv -a MD5 -t $SNMPTimeout"
+		if [ ${#SNMPPassword} -lt "8" ] ; then
+			echo "snmpwalk:  (The supplied password is too short.)"
+			exit 1
+		fi
+	fi
+
+	case "$status" in
+
+		info)
+			# Display Information about NAS
+			tmpRequest=`$SNMPWALK $SNMPArgs $hostname $OID_ng 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL;
+			else	
+				nbDisk=$(echo "$tmpRequest" | grep $OID_diskID | wc -l)
+			fi
+			syno=`$SNMPGET $SNMPArgs $hostname $OID_diskID $OID_serialNumber $OID_software $OID_CPUTemp $OID_systemFanStatus 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+				serialNumber=$(echo "$syno" | grep "$OID_serialNumber" | sed 's/.*"\(.*\)".*/\1/')
+				softwareVersion=$(echo "$syno" | grep "$OID_software" | sed 's/.*"\(.*\)".*/\1/')
+				CPUTemp=$(echo "$syno" | grep "$OID_CPUTemp" | sed 's/.*INTEGER: \(.*\).*/\1/')
+				systemFanStatus=$(echo "$syno" | grep $OID_systemFanStatus | sed 's/.*"\(.*\)".*/\1/')
+
+
+				if [ "$serialNumber" != "" ] ; then
+					output=$output"Netgear s/n:  -  "$serialNumber"\n"
+				fi
+				if [ "$softwareVersion" != "" ] ; then
+					output=$output"Software Version:  -  "$softwareVersion"\n"
+				fi
+				if [ "$CPUTemp" != "" ] ; then
+					output=$output"System CPU Temperature:  -  "$CPUTemp"degC\n"
+				fi
+				if [ "$systemFanStatus" != "" ] ; then
+					output=$output"System Fan Status:  -  "$systemFanStatus"\n"
+				fi
+				if [ "$nbDisk" != "" ] ; then
+					output=$output"Number of disks:  -  "$nbDisk""
+				fi
+
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+		raid)
+			# Check RAID
+			tmpRequest=`$SNMPWALK $SNMPArgs $hostname $OID_ng 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+				nbRAID=$(echo "$tmpRequest" | grep $OID_RAIDName | wc -l)
+
+				for i in `seq 1 $nbRAID`; do
+					OID_RAID="$OID_RAID $OID_RAIDName.$(($i-1)) $OID_RAIDStatus.$(($i-1)) $OID_RAIDLevel.$(($i-1))" 
+				done
+				syno=`$SNMPGET $SNMPArgs $hostname $OID_RAID 2> /dev/null`
+				if [ "$?" != "0" ] ; then
+					output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				fi
+
+
+				#Check all RAID volume status
+				forReturn=$STATE_OK
+
+				for i in `seq 1 $nbRAID`; do
+					RAIDName[$i]=$(echo "$syno" | grep $OID_RAIDName.$(($i-1)) | sed 's/.*"\(.*\)".*/\1/')
+					RAIDStatus[$i]=$(echo "$syno" | grep $OID_RAIDStatus.$(($i-1)) | sed 's/.*"\(.*\)".*/\1/')
+					RAIDLevel[$i]=$(echo "$syno" | grep $OID_RAIDSLevel.$(($i-1)) | sed 's/.*"\(.*\)".*/\1/')
+
+					case ${RAIDStatus[$i]} in
+						REDUNDANT)		RAIDStatus[$i]="REDUNDANT";			forReturn=$STATE_OK; 					output=$output"RAID status (${RAIDName[$i]}): ${RAIDStatus[$i]}\n";;
+						UNPROTECTED)	RAIDStatus[$i]="UNPROTECTED";		forReturn=$STATE_CRITICAL;				output=$output"RAID status (${RAIDName[$i]}): ${RAIDStatus[$i]}\n";;
+						DEGRADED)		RAIDStatus[$i]="DEGRADED";			forReturn=$STATE_CRITICAL;				output=$output"RAID status (${RAIDName[$i]}): ${RAIDStatus[$i]}\n";;
+						DEAD)			RAIDStatus[$i]="DEAD";				forReturn=$STATE_CRITICAL;				output=$output"RAID status (${RAIDName[$i]}): ${RAIDStatus[$i]}\n";;
+						INACTIVE)		RAIDStatus[$i]="INACTIVE";			forReturn=$STATE_WARNING;				output=$output"RAID status (${RAIDName[$i]}): ${RAIDStatus[$i]}\n";;				
+						UNKNOWN)		RAIDStatus[$i]="UNKNOWN";			forReturn=$STATE_WARNING;				output=$output"RAID status (${RAIDName[$i]}): ${RAIDStatus[$i]}\n";;
+						*)				RAIDStatus[$i]="UNKNOWN";			forReturn=$STATE_WARNING;				output=$output"RAID status (${RAIDName[$i]}): ${RAIDStatus[$i]}\n";;
+					esac
+	
+					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_WARNING;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+				done
+			fi
+			if [ "$output" == "" ] ; then
+				output="No information returned"
+				intReturn=$STATE_WARNING
+			else
+				output=${output:0:${#output}-2}
+			fi
+		;;
+
+
+		disk_status)
+			# Check DISK Status
+			tmpRequest=`$SNMPWALK $SNMPArgs $hostname $OID_ng 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+				nbDisk=$(echo "$tmpRequest" | grep $OID_diskID | wc -l)
+				
+				for i in `seq 1 $nbDisk`; do
+					if [ $i -lt 25 ] ; then
+						OID_disk="$OID_disk $OID_diskID.$(($i-1)) $OID_diskModel.$(($i-1)) $OID_diskStatus.$(($i-1)) $OID_diskTemp.$(($i-1)) $OID_diskError.$(($i-1))" 
+					else
+						OID_disk2="$OID_disk2 $OID_diskID.$(($i-1)) $OID_diskModel.$(($i-1)) $OID_diskStatus.$(($i-1)) $OID_diskTemp.$(($i-1)) $OID_diskError.$(($i-1))"
+					fi   
+				done
+
+				syno=`$SNMPGET $SNMPArgs $hostname $OID_disk 2> /dev/null`
+				if [ "$?" != "0" ] ; then
+					output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				fi
+				if [ "$OID_disk2" != "" ]; then
+					syno2=`$SNMPGET $SNMPArgs $hostname $OID_disk2 2> /dev/null`
+					syno=$(echo "$syno";echo "$syno2";)
+				fi
+
+				#Check all Disk status
+				forReturn=$STATE_OK
+
+				for i in `seq 1 $nbDisk`; do
+					diskID[$i]=$(echo "$syno" | grep "$OID_diskID.$(($i-1)) " | sed 's/.*"\(.*\)".*/\1/')
+					diskModel[$i]=$(echo "$syno" | grep "$OID_diskModel.$(($i-1)) " | sed 's/.*"\(.*\)".*/\1/')
+					diskStatus[$i]=$(echo "$syno" | grep "$OID_diskStatus.$(($i-1)) " | sed 's/.*"\(.*\)".*/\1/')
+					diskError[$i]=$(echo "$syno" | grep "$OID_diskError.$(($i-1)) " | sed 's/.*INTEGER: \(.*\).*/\1/')					
+
+
+					case ${diskStatus[$i]} in
+						Online)		diskStatus[$i]="Online";			forReturn=$STATE_OK;;#		output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
+						Offline)	diskStatus[$i]="Offline";			forReturn=$STATE_CRITICAL;	output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
+						*)			diskStatus[$i]="UNKNOWN";			forReturn=$STATE_WARNING;	output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
+					esac
+					
+					if [ "${diskError[$i]}" -ge "$Reallocated_Sector_Ct_Warning" ] ; then forReturn=$STATE_WARNING; fi
+					if [ "${diskError[$i]}" -gt "$Reallocated_Sector_Ct_Critical" ] ; then forReturn=$STATE_CRITICAL; fi
+
+
+					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_WARNING;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then				
+						intReturn=$STATE_CRITICAL;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+				done
+			fi
+			if [ "$intReturn" == "$STATE_OK" ] ; then						
+				output="Number of Disks: $nbDisk  -  Status: [OK]\n"
+			fi
+			if [ "$output" == "" ] ; then
+				output="No information returned"
+				intReturn=$STATE_WARNING
+			else
+				output=${output:0:${#output}-2}
+			fi
+		;;
+
+
+
+		disk_temp)
+			# Check DISK Temperature
+			tmpRequest=`$SNMPWALK $SNMPArgs $hostname $OID_ng 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+				nbDisk=$(echo "$tmpRequest" | grep $OID_diskID | wc -l)
+				
+				for i in `seq 1 $nbDisk`; do
+					if [ $i -lt 25 ] ; then
+						OID_disk="$OID_disk $OID_diskID.$(($i-1)) $OID_diskModel.$(($i-1)) $OID_diskStatus.$(($i-1)) $OID_diskTemp.$(($i-1)) " 
+					else
+						OID_disk2="$OID_disk2 $OID_diskID.$(($i-1)) $OID_diskModel.$(($i-1)) $OID_diskStatus.$(($i-1)) $OID_diskTemp.$(($i-1)) "
+					fi   
+				done
+
+				syno=`$SNMPGET $SNMPArgs $hostname $OID_disk 2> /dev/null`
+				if [ "$?" != "0" ] ; then
+					output="CRITICAL - Problem with SNMP request, check user/password/host"
+					intReturn=$STATE_CRITICAL ;
+				fi
+				if [ "$OID_disk2" != "" ]; then
+					syno2=`$SNMPGET $SNMPArgs $hostname $OID_disk2 2> /dev/null`
+					syno=$(echo "$syno";echo "$syno2";)
+				fi
+
+				#Check all Disk status
+				forReturn=$STATE_OK
+
+				for i in `seq 1 $nbDisk`; do
+					diskID[$i]=$(echo "$syno" | grep "$OID_diskID.$(($i-1)) " | sed 's/.*"\(.*\)".*/\1/')
+					diskTemp[$i]=$(echo "$syno" | grep "$OID_diskTemp.$(($i-1)) " | sed 's/.*INTEGER: \(.*\).*/\1/')
+
+
+					if [ "${diskTemp[$i]}" -le "$warningTemperature" ] ; then
+						output=$output"(${diskID[$i]}) Temperature: ${diskTemp[$i]}degC\n"
+						forReturn=$STATE_OK ;
+					fi
+					if [ "${diskTemp[$i]}" -gt "$warningTemperature" ]&&[ "${diskTemp[$i]}" -le "$criticalTemperature" ] ; then
+						output=$output"(${diskID[$i]}) Temperature above warning threshold of "$warningTemperature"degC: ${diskTemp[$i]}degC\n"
+						forReturn=$STATE_WARNING ;
+					fi
+					if [ "${diskTemp[$i]}" -gt "$warningTemperature" ]&&[ "${diskTemp[$i]}" -gt "$criticalTemperature" ] ; then
+						output=$output"(${diskID[$i]}) Temperature above critical threshold of "$criticalTemperature"degC: ${diskTemp[$i]}degC\n"
+						forReturn=$STATE_CRITICAL ;
+					fi
+
+					if [ "$forReturn" == "$STATE_WARNING" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_WARNING;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_OK" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+					if [ "$forReturn" == "$STATE_CRITICAL" ]&&[ "$intReturn" == "$STATE_WARNING" ] ; then
+						intReturn=$STATE_CRITICAL;
+					fi	
+				done
+			fi
+			if [ "$output" == "" ] ; then
+				output="No information returned"
+				intReturn=$STATE_WARNING
+			else
+				output=${output:0:${#output}-2}
+			fi
+		;;
+
+
+
+
+		usage)
+			# Check System Temperature
+			syno=`$SNMPGET $SNMPArgs $hostname $OID_StorageSizeFree $OID_StorageSize $OID_StorageDesc   2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+				StorageSizeUsed=$(echo "$syno" | grep "$OID_StorageSizeFree" | sed 's/.*INTEGER: \(.*\).*/\1/')
+				StorageSize=$(echo "$syno" | grep "$OID_StorageSize" | sed 's/.*INTEGER: \(.*\).*/\1/')
+				StorageDesc=$(echo "$syno" | grep "$OID_StorageDesc" | sed 's/.*"\(.*\)".*/\1/')
+
+				#Convert from megabytes to TB
+				StorageSizeFree_TB=$(echo "scale=1;$StorageSizeUsed / 1000000" | bc)
+				StorageSize_TB=$(echo "scale=1;$StorageSize / 1000000" | bc)
+				#Calculate used space in Percentage
+				tmp=$(echo "scale=1; 100 / $StorageSize_TB" | bc)
+				StoragePercentFree=$(echo "scale=1; $tmp * $StorageSizeFree_TB" | bc)		
+				StorageFree=$(echo "scale=0; $StoragePercentFree / 1" | bc)	
+
+				if [ "$StorageFree" != "" ] ; then
+					if [ "$StorageFree" -ge "$warningStorage" ] ; then
+						output="OK - Storage Capacity ["$StorageDesc"]: "$StorageSize_TB"TB, of it free: "$StoragePercentFree"%"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$StorageFree" -lt "$warningStorage" ]&&[ "$StorageFree" -ge "$criticalStorage" ] ; then
+						output="WARNING - Storage Capacity ["$StorageDesc"]: "$StorageSize_TB"TB, of it free: "$StoragePercentFree"%"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$StorageFree" -lt "$warningStorage" ]&&[ "$StorageFree" -lt "$criticalStorage" ] ; then
+						output="CRITICAL - Storage Capacity ["$StorageDesc"]: "$StorageSize_TB"TB, of it free: "$StoragePercentFree"%"
+						intReturn=$STATE_CRITICAL ;
+					fi
+				else
+					output="WARNING - No Storage Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;	
+
+		*)
+			usage; exit 0
+		;;
+
+	esac
+
+	echo -e $output
+	exit $intReturn
+fi
+
