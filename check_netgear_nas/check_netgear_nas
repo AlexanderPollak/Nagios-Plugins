@@ -145,8 +145,8 @@ if [ "$warningTemperature" -gt "$criticalTemperature" ] ; then
     exit 1 
 fi
 
-if [ "$warningStorage" -gt "$criticalStorage" ] ; then
-    echo "The Critical storage usage percentage  must be higher than the warning storage usage percentage"
+if [ "$warningStorage" -lt "$criticalStorage" ] ; then
+    echo "The Critical storage free space percentage must be less than the warning storage free space percentage"
     echo "Warning: $warningStorage"
     echo "Critical: $criticalStorage"
     echo ""
