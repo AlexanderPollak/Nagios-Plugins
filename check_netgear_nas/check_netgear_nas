@@ -318,11 +318,11 @@ else
 						*)												forReturn=$STATE_WARNING;	output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
 					esac
 					
-					if [ "${diskError[$i]}" -ge "$Reallocated_Sector_Ct_Warning" ] ; then 
+					if [ "${diskError[$i]}" -ge "$Reallocated_Sector_Ct_Warning" ] && [ "${diskError[$i]}" -lt "$Reallocated_Sector_Ct_Critical" ] ; then 
 						forReturn=$STATE_WARNING; 
 						output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n"
 					fi
-					if [ "${diskError[$i]}" -gt "$Reallocated_Sector_Ct_Critical" ] ; then 
+					if [ "${diskError[$i]}" -ge "$Reallocated_Sector_Ct_Critical" ] ; then 
 						forReturn=$STATE_CRITICAL;
 						output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n"
 					fi
