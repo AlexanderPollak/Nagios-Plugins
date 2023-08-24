@@ -117,7 +117,7 @@ if [ "$1" == "--help" ]; then
     usage; exit 0
 fi
 
-while getopts 2:W:C:w:c:U:P:h:p:s: OPTNAME; do
+while getopts 2:W:C:w:c:U:P:h:p:s:r:l: OPTNAME; do
 	case "$OPTNAME" in
 	U)	SNMPUser="$OPTARG";;
 	P)	SNMPPassword="$OPTARG";;
