@@ -313,9 +313,9 @@ else
 
 
 					case ${diskStatus[$i]} in
-						Online)		diskStatus[$i]="Online";			forReturn=$STATE_OK;;#		output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
-						Offline)	diskStatus[$i]="Offline";			forReturn=$STATE_CRITICAL;	output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
-						*)			diskStatus[$i]="UNKNOWN";			forReturn=$STATE_WARNING;	output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
+						ONLINE)		diskStatus[$i]="Online";			forReturn=$STATE_OK;;#		output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
+						OFFLINE)	diskStatus[$i]="Offline";			forReturn=$STATE_CRITICAL;	output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
+						*)												forReturn=$STATE_WARNING;	output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
 					esac
 					
 					if [ "${diskError[$i]}" -ge "$Reallocated_Sector_Ct_Warning" ] ; then forReturn=$STATE_WARNING; fi
