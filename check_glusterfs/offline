@@ -1,0 +1,15 @@
+root@sis1:/mnt# gluster volume status
+Status of volume: primary
+Gluster process                             TCP Port  RDMA Port  Online  Pid
+------------------------------------------------------------------------------
+Brick sis1.hcro.org:/mnt/glusterfs/datae    N/A       N/A        N       N/A  
+Brick sis1.hcro.org:/mnt/glusterfs/dataf    N/A       N/A        N       N/A  
+Brick sis1.hcro.org:/mnt/glusterfs/dataa    57371     0          Y       1504417
+ 
+Task Status of Volume primary
+------------------------------------------------------------------------------
+Task                 : Rebalance           
+ID                   : 664e95e1-a5dd-4f9c-bf64-1ebaf914663b
+Status               : completed           
+ 
+
