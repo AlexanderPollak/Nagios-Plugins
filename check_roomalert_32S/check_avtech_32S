@@ -2,19 +2,19 @@
 
 ##
 #
-# receive status and current information from Avtech RoomAlert 12S
+# receive status and current information from Avtech RoomAlert 32S
 #
 # you can get all snmp-options with:
 #	snmpwalk -m ALL -v 2c -c MYCOMMUNITY MYIPADDRESS  avtech
 #
-# Note that you will need to install "ROOMALERT12S.MIB" in order to resolve the requests.
+# Note that you will need to install "ROOMALERT32S.MIB" in order to resolve the requests.
 #
 # Usage:
-#	./check_avtech_12S -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
+#	./check_avtech_32S -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
 #
 #
 # 2023-06-26:  Version 1.0	\\ Alexander Pollak
-#
+# 2024-02-21:  Version 1.1      \\ Marc Jacquart
 ##
 
 
@@ -28,14 +28,14 @@ SNMPCommunity="public"
 SNMPTimeout="10"
 SNMPPort="161"
 
-# InfoList for S12
+# InfoList for S32
 MIB_IDENTNAME="sysName.0"
 MIB_IDENTLOCATION="sysLocation.0"
 MIB_IDENTCONTACT="sysContact.0"
 MIB_IDENTMODEL="sysDescr.0"
 
 
-# VarList for S12
+# VarList for S32
 MIB_INT_TEMP="internal-tempc.0"
 MIB_EXT_TEMP="internal-analog1.0"
 
@@ -63,7 +63,7 @@ intReturn=$STATE_OK
 
 usage()
 {
-	echo "usage: ./check_avtech_12S -h [hostname] -c [community] -s [check]"
+	echo "usage: ./check_avtech_32S -h [hostname] -c [community] -s [check]"
 	echo "options:"
 	echo "	-h  [snmp hostname]   Hostname"
 	echo "	-c  [community name]  community name (ex: public)"
@@ -168,7 +168,7 @@ else
 						output="OK - Temperature: "$INT_TEMP_DEC1"degC"
 						intReturn=$STATE_OK ;
 					fi
-					
+
 					if [ "$INT_TEMP" -gt "$T_high_warning_100" ]&&[ "$INT_TEMP" -le "$T_high_critical_100" ] ; then
 						INT_TEMP_DEC1=$(echo "scale=1;$INT_TEMP / 100" | bc)
 						output="WARNING - Temperature above warning threshold of "$T_high_warning"degC:  Temperature="$INT_TEMP_DEC1"degC"
@@ -190,7 +190,7 @@ else
 						intReturn=$STATE_CRITICAL ;
 					fi
 				else
-					output="WARNING - No 12S Internal Temperature Information Returned"
+					output="WARNING - No 32S Internal Temperature Information Returned"
 					intReturn=$STATE_WARNING
 				fi
 			fi
@@ -219,7 +219,7 @@ else
 						output="OK - Temperature: "$INT_TEMP_DEC1"degC"
 						intReturn=$STATE_OK ;
 					fi
-					
+
 					if [ "$EXT_TEMP" -gt "$T_high_warning_10" ]&&[ "$EXT_TEMP" -le "$T_high_critical_10" ] ; then
 						EXT_TEMP_DEC1=$(echo "scale=1;$EXT_TEMP / 10" | bc)
 						output="WARNING - Temperature above warning threshold of "$T_high_warning"degC:  Temperature="$EXT_TEMP_DEC1"degC"
@@ -241,7 +241,7 @@ else
 						intReturn=$STATE_CRITICAL ;
 					fi
 				else
-					output="WARNING - No 12S External Temperature Information Returned"
+					output="WARNING - No 32S External Temperature Information Returned"
 					intReturn=$STATE_WARNING
 				fi
 			fi
