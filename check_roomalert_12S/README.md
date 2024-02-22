@@ -33,9 +33,9 @@ change in the fourth line "#mibs" to "mibs ALL"
     ext_temp          Check External Temperature sensor [Connected to Analog Input 1]
 
 -A  [Temp. High warning]   Threshold for Temperature Sensor High Warning [Default: 23degC]
--B  [Temp. High critical]  Threshold for Temperature Sensor High Warning [Default: 25degC]
+-B  [Temp. High critical]  Threshold for Temperature Sensor High Critical [Default: 25degC]
 -C  [Temp. Low warning]    Threshold for Temperature Sensor Low Warning [Default: 7degC]
--D  [Temp. Low critical]   Threshold for Temperature Sensor Low Warning [Default: 5degC]
+-D  [Temp. Low critical]   Threshold for Temperature Sensor Low Critical [Default: 5degC]
 ```
 
 # Examples:
