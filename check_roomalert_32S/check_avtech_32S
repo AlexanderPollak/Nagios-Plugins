@@ -203,7 +203,7 @@ else
 
 					if [ "$TEMP" != "" ] ; then
 						if ! [[ "$TEMP" =~ ^[0-9]{4}$ ]] ; then
-							output="Warning - Raw S32 Temperature value is not a 4 digit number."
+							output="Warning - Raw S32 Temperature value is not a 3 or 4 digit number. Value: $TEMP"
 							intReturn=$STATE_WARNING
 
 						else
@@ -257,8 +257,8 @@ else
 					H_low_critical_100=$(echo $((H_low_critical * 100)))
 
 					if [ "$HUMIDITY" != "" ] ; then
-						if ! [[ "$HUMIDITY" =~ ^[0-9]{4}$ ]] ; then
-							output="Warning - Raw S32 Humidity value is not a 4 digit number."
+						if ! [[ "$HUMIDITY" =~ ^[0-9]{3,4}$ ]] ; then
+							output="Warning - Raw S32 Humidity value is not a 3 or 4 digit number. Value: $HUMIDITY"
 							intReturn=$STATE_WARNING
 
 						else
