@@ -37,8 +37,8 @@ MIB_IDENTMODEL="sysDescr.0"
 
 # Default Values for Temperature Warning and Critical Checks:
 
-T_high_warning="23"   # Temperature in degC
-T_high_critical="25"  # Temperature in degC
+T_high_warning="25"   # Temperature in degC
+T_high_critical="30"  # Temperature in degC
 
 T_low_warning="7"   # Temperature in degC
 T_low_critical="5"  # Temperature in degC
