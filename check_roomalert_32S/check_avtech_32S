@@ -37,8 +37,8 @@ MIB_IDENTMODEL="sysDescr.0"
 
 # Default Values for Temperature Warning and Critical Checks:
 
-T_high_warning="23"   # Temperature in degC
-T_high_critical="25"  # Temperature in degC
+T_high_warning="25"   # Temperature in degC
+T_high_critical="30"  # Temperature in degC
 
 T_low_warning="7"   # Temperature in degC
 T_low_critical="5"  # Temperature in degC
@@ -89,6 +89,7 @@ usage()
 	echo ""
 	echo "examples:	./check_avtech_32S -h 1.2.3.4 -c public -s info"
 	echo "		./check_avtech_32S -h 1.2.3.4 -p 4321 -c public -d 1 -s temp "
+	echo "		./check_avtech_32S -h 1.2.3.4 -p 4321 -c public -d 0 -s hum "
 	exit 3
 }
 
