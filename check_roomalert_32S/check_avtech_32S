@@ -89,6 +89,7 @@ usage()
 	echo ""
 	echo "examples:	./check_avtech_32S -h 1.2.3.4 -c public -s info"
 	echo "		./check_avtech_32S -h 1.2.3.4 -p 4321 -c public -d 1 -s temp "
+	echo "		./check_avtech_32S -h 1.2.3.4 -p 4321 -c public -d 0 -s hum "
 	exit 3
 }
 
