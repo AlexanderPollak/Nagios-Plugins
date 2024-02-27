@@ -77,11 +77,14 @@ usage()
 	echo ""
 	echo "	-d  [sensor number]   Sensor id number to check [0-8]"
 	echo "                        0 is for the internal sensor"
+	echo "                        This works for digital (Temp. and Hum.)"
+	echo "                        and switch (flood) sensors."
 	echo ""
 	echo "	-s  [check]           Check to be executed"
 	echo "	    info              System infos"
 	echo "	    temp              Check Temperature Sensor"
 	echo "	    hum               Check Humidity Sensor"
+	echo "      flood             Check Flood Sensor"
 	echo ""
 	echo "	-A  [Temp. High warning]   Threshold for Temperature Sensor High Warning [Default: 23degC]"
 	echo "	-B  [Temp. High critical]  Threshold for Temperature Sensor High Critical [Default: 25degC]"
@@ -168,11 +171,8 @@ else
 			# First, build variable name from script -s and -d inputs
 			if [ "$sensor_number" = "0" ] ; then # Internal sensor
 				SENSOR_NAME="${MIB_PREFIX}internal-tempc.0"
-			elif [[ $sensor_number=~'^[1-8]$' ]] ; then # External sensors
+			else # External sensors
 				SENSOR_NAME="${MIB_PREFIX}digital-sen${sensor_number}-${TEMP_ID}.0"
-			else
-				output="Warning - S32 sensor number must be between 0 and 8."
-				intReturn=1
 			fi
 
 			int=`snmpget $SNMPArgs $SENSOR_NAME 2> /dev/null`
@@ -227,11 +227,8 @@ else
 			# First, build variable name from script -s and -d inputs
 			if [ "$sensor_number" = "0" ] ; then # Internal sensor
 				SENSOR_NAME="${MIB_PREFIX}internal-humidity.0"
-			elif [[ $sensor_number=~'^[1-8]$' ]] ; then # External sensors
+			else # External sensors
 				SENSOR_NAME="${MIB_PREFIX}digital-sen${sensor_number}-${HUM_ID}.0"
-			else
-				output="Warning - S32 sensor number must be between 0 and 8."
-				intReturn=1
 			fi
 			int=`snmpget $SNMPArgs $SENSOR_NAME 2> /dev/null`
 			if [ "$?" != "0" ] ; then
@@ -270,15 +267,35 @@ else
 						intReturn=$STATE_CRITICAL ;
 					else	
 						output="Warning - S32 Humidity alert thresholds are not correctly defined (must be: H_crit-low < H_warn-low < H_warn-high < H_crit-high).  Humidity="$HUMIDITY_DEC1"%"
-						intReturn=$STATE_WARNING
+						intReturn=$STATE_WARNING ;
 					fi
 				else
 					output="WARNING - No 32S Humidity Information Returned"
-					intReturn=$STATE_WARNING
+					intReturn=$STATE_WARNING ;
 				fi
 			fi
 		;;
-		
+
+		flood)
+			SENSOR_NAME="${MIB_PREFIX}switch-sen${sensor_number}.0"
+			int=`snmpget $SNMPArgs $SENSOR_NAME 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output=$output"CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+				switch_sensor_value=$(echo "$int" | grep "$SENSOR_NAME" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+				if [ "$switch_sensor_value" = "0" ] ; then
+					output="CRITICAL - Flood Sensor $sensor_number detected water."
+					intReturn=$STATE_CRITICAL ;
+				elif [ "$switch_sensor_value" = "1" ] ; then
+					output="OK"
+					intReturn=$STATE_OK ;
+				else
+					output="Warning - Switch sensor value \"$switch_sensor_value\" should be \"0\" or \"1\"."
+					intReturn=$STATE_WARNING ;
+				fi
+			fi
+		;;
 	esac
 
 	echo -e $output
