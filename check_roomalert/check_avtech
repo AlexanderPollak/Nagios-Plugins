@@ -2,19 +2,19 @@
 
 ##
 #
-# receive status and current information from Avtech RoomAlert 32S
+# receive status and current information from Avtech RoomAlert 12S or 32S
 #
 # you can get all snmp-options with:
 #	snmpwalk -m ALL -v 2c -c MYCOMMUNITY MYIPADDRESS  avtech
 #
-# Note that you will need to install "ROOMALERT32S.MIB" in order to resolve the requests.
+# Note that you will need to install "ROOMALERT12S.MIB" or/and "ROOMALERT32S.MIB" in order to resolve the requests.
 #
 # Usage:
-#	./check_avtech_32S -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
+#	./check_avtech -h IP-ADDRESS -c SNMP-COMMUNITY -m MODEL-TYPE -s STATUSCHECK
 #
 #
 # 2023-06-26:  Version 1.0	\\ Alexander Pollak
-# 2024-02-21:  Version 1.1  \\ Marc Jacquart
+# 2024-03-05:  Version 1.1  \\ Marc Jacquart
 ##
 
 
@@ -28,13 +28,13 @@ SNMPCommunity="public"
 SNMPTimeout="10"
 SNMPPort="161"
 
-# InfoList for S32
+# InfoList
 MIB_IDENTNAME="sysName.0"
 MIB_IDENTLOCATION="sysLocation.0"
 MIB_IDENTCONTACT="sysContact.0"
 MIB_IDENTMODEL="sysDescr.0"
 
-MIB_PREFIX="ROOMALERT32S-MIB::"
+
 TEMP_ID="1" # .MIB file define temperature [C] for a sensor with id value 1
 HUM_ID="3" # .MIB file define humidity [%] for a sensor with id value 3
 	
@@ -54,8 +54,8 @@ H_high_critical="70" # Humidity in %
 H_low_warning="20"  # Humidity in %
 H_low_critical="10" # Humidity in %
 
-
-
+#Default roomalert model type:
+MODEL_ID="12S"
 
 # nagios return values
 export STATE_OK=0
@@ -68,12 +68,13 @@ intReturn=$STATE_OK
 
 usage()
 {
-	echo "usage: ./check_avtech_32S -h [hostname] -c [community] -s [check]"
+	echo "usage: ./check_avtech -h [hostname] -c [community] -m [model] -s [check]"
 	echo "options:"
 	echo "	-h  [snmp hostname]   Hostname"
 	echo "	-c  [community name]  Community name (default: public)"
 	echo "	-p  [snmp port]       Port for snmp request (default: 161)"
 	echo "	-t  [timeout]	      Duration before doing an timeout in seconds (default: 10s)"
+	echo "  -m  [model type]        Roomalert model type, must be \"12S\" or \"32S\" (default: 12S)"
 	echo ""
 	echo "	-d  [sensor number]   Sensor id number to check [0-8]"
 	echo "                        0 is for the internal sensor"
@@ -82,12 +83,13 @@ usage()
 	echo ""
 	echo "	-s  [check]           Check to be executed"
 	echo "	    info              System infos"
-	echo "	    temp              Check Temperature Sensor"
-	echo "	    hum               Check Humidity Sensor"
+	echo "	    dig_temp          Check Digital Temperature Sensor"
+	echo "	    dig_hum           Check Digital Humidity Sensor"
+	echo "      ana_temp          Check Analog Temperature Sensor"
 	echo "      flood             Check Flood Sensor"
 	echo ""
-	echo "	-A  [Temp. High warning]   Threshold for Temperature Sensor High Warning [Default: 23degC]"
-	echo "	-B  [Temp. High critical]  Threshold for Temperature Sensor High Critical [Default: 25degC]"
+	echo "	-A  [Temp. High warning]   Threshold for Temperature Sensor High Warning [Default: 25degC]"
+	echo "	-B  [Temp. High critical]  Threshold for Temperature Sensor High Critical [Default: 30degC]"
 	echo "	-C  [Temp. Low warning]    Threshold for Temperature Sensor Low Warning [Default: 7degC]"
 	echo "	-D  [Temp. Low critical]   Threshold for Temperature Sensor Low Critical [Default: 5degC]"
 	echo "	-E  [Hum. High warning]    Threshold for Humidity Sensor High Warning [Default: 60%]"
@@ -95,9 +97,9 @@ usage()
 	echo "	-G  [Hum. Low warning]     Threshold for Humidity Sensor Low Warning [Default: 20%]"
 	echo "	-H  [Hum. Low critical]    Threshold for Humidity Sensor Low Critical [Default: 10%]"
 	echo ""
-	echo "examples:	./check_avtech_32S -h 1.2.3.4 -c public -s info"
-	echo "		./check_avtech_32S -h 1.2.3.4 -p 4321 -c public -d 1 -s temp "
-	echo "		./check_avtech_32S -h 1.2.3.4 -p 4321 -c public -d 0 -s hum "
+	echo "examples:	./check_avtech -h 1.2.3.4 -c public -m 32S -s info"
+	echo "		    ./check_avtech -h 1.2.3.4 -p 4321 -c public -m 32S -d 1 -s temp "
+	echo "		    ./check_avtech -h 1.2.3.4 -p 4321 -c public -m 32S -d 0 -s hum "
 	exit 3
 }
 
@@ -105,7 +107,7 @@ if [ "$1" == "--help" ]; then
 	usage; exit 0
 fi
 
-while getopts c:h:p:d:s:t:A:B:C:D:E:F:G:H: OPTNAME; do
+while getopts c:h:p:d:s:t:m:A:B:C:D:E:F:G:H: OPTNAME; do
 	case "$OPTNAME" in
 	h)	hostname="$OPTARG";;
 	c)	SNMPCommunity="$OPTARG";;
@@ -113,6 +115,7 @@ while getopts c:h:p:d:s:t:A:B:C:D:E:F:G:H: OPTNAME; do
 	d)  sensor_number="$OPTARG";;
 	s)	status="$OPTARG";;
 	t)	SNMPTimeout="$OPTARG";;
+	m)  MODEL_ID="$OPTARG";;
 	A)	T_high_warning="$OPTARG";;
 	B)	T_high_critical="$OPTARG";;
 	C)	T_low_warning="$OPTARG";;
@@ -123,7 +126,7 @@ while getopts c:h:p:d:s:t:A:B:C:D:E:F:G:H: OPTNAME; do
 	H)  H_low_critical="$OPTARG";;
 	esac
 done
-
+MIB_PREFIX="ROOMALERT${MODEL_ID}-MIB::"
 
 if [ "$hostname" = "" ] || [ "$SNMPCommunity" = "" ] ; then
 	usage
@@ -133,7 +136,7 @@ else
 	case "$status" in
 
 		info)
-			# Information readout for 32S 
+			# Information readout 
 			info=`snmpget $SNMPArgs $MIB_IDENTNAME $MIB_IDENTLOCATION $MIB_IDENTCONTACT $MIB_IDENTMODEL 2> /dev/null`
 			if [ "$?" != "0" ] ; then
 				output=$output"CRITICAL - Problem with SNMP request, check user/password/host"
@@ -165,16 +168,14 @@ else
 			fi
 		;;
 
-
-		temp) 
-			# Check temperature sensor
+		dig_temp) 
+			# Check digital temperature sensor
 			# First, build variable name from script -s and -d inputs
 			if [ "$sensor_number" = "0" ] ; then # Internal sensor
 				SENSOR_NAME="${MIB_PREFIX}internal-tempc.0"
 			else # External sensors
 				SENSOR_NAME="${MIB_PREFIX}digital-sen${sensor_number}-${TEMP_ID}.0"
 			fi
-
 			int=`snmpget $SNMPArgs $SENSOR_NAME 2> /dev/null`
 			if [ "$?" != "0" ] ; then
 				output=$output"CRITICAL - Problem with SNMP request, check user/password/host"
@@ -212,18 +213,18 @@ else
 						intReturn=$STATE_CRITICAL ;
 
 					else
-						output="Warning - S32 Temperature alert thresholds are not correctly defined (must be: T_crit-low < T_warn-low < T_warn-high < T_crit-high).  Temperature="$TEMP_DEC1"degC"
+						output="Warning - ${MODEL_ID} Temperature alert thresholds are not correctly defined (must be: T_crit-low < T_warn-low < T_warn-high < T_crit-high).  Temperature="$TEMP_DEC1"degC"
 						intReturn=$STATE_WARNING
 					fi
 				else
-					output="WARNING - No 32S Internal Temperature Information Returned"
+					output="WARNING - No ${MODEL_ID} Internal Temperature Information Returned"
 					intReturn=$STATE_WARNING
 				fi
 			fi
 		;;
 
-		hum)
-			# Check Humidity Sensor
+		dig_hum)
+			# Check digital humidity sensor
 			# First, build variable name from script -s and -d inputs
 			if [ "$sensor_number" = "0" ] ; then # Internal sensor
 				SENSOR_NAME="${MIB_PREFIX}internal-humidity.0"
@@ -266,12 +267,64 @@ else
 						output="CRITICAL - Humidity below critical threshold of "$H_low_critical"%:  Humidity="$HUMIDITY_DEC1"%"
 						intReturn=$STATE_CRITICAL ;
 					else	
-						output="Warning - S32 Humidity alert thresholds are not correctly defined (must be: H_crit-low < H_warn-low < H_warn-high < H_crit-high).  Humidity="$HUMIDITY_DEC1"%"
+						output="Warning - ${MODEL_ID} Humidity alert thresholds are not correctly defined (must be: H_crit-low < H_warn-low < H_warn-high < H_crit-high).  Humidity="$HUMIDITY_DEC1"%"
 						intReturn=$STATE_WARNING ;
 					fi
 				else
-					output="WARNING - No 32S Humidity Information Returned"
+					output="WARNING - No ${MODEL_ID} Humidity Information Returned"
 					intReturn=$STATE_WARNING ;
+				fi
+			fi
+		;;
+
+		ana_temp)
+			# Check analog temperature sensor
+			# First, build variable name from script -s and -d inputs
+			SENSOR_NAME="${MIB_PREFIX}internal-analog${sensor_number}.0"
+
+			int=`snmpget $SNMPArgs $SENSOR_NAME 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output=$output"CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+
+			else
+				TEMP=$(echo "$int" | grep "$SENSOR_NAME" | sed 's/.*INTEGER: \(.*\).*/\1/' )
+
+				T_high_warning_10=$(echo $((T_high_warning * 10)))
+				T_high_critical_10=$(echo $((T_high_critical * 10)))
+
+				T_low_warning_10=$(echo $((T_low_warning * 10)))
+				T_low_critical_10=$(echo $((T_low_critical * 10)))
+
+				if [ "$TEMP" != "" ] ; then
+					TEMP_DEC1=$(echo "scale=1;$TEMP / 10" | bc)
+					if [ "$TEMP" -le "$T_high_warning_10" ]&&[ "$TEMP" -ge "$T_low_warning_10" ]  ; then
+						output="OK - Temperature: "$TEMP_DEC1"degC"
+						intReturn=$STATE_OK ;
+
+					elif [ "$TEMP" -gt "$T_high_warning_10" ]&&[ "$TEMP" -le "$T_high_critical_10" ] ; then	
+						output="WARNING - Temperature above warning threshold of "$T_high_warning"degC:  Temperature="$TEMP_DEC1"degC"
+						intReturn=$STATE_WARNING ;
+
+					elif [ "$TEMP" -gt "$T_high_warning_10" ]&&[ "$TEMP" -gt "$T_high_critical_10" ] ; then
+						output="CRITICAL - Temperature above critical threshold of "$T_high_critical"degC:  Temperature="$TEMP_DEC1"degC"
+						intReturn=$STATE_CRITICAL ;
+
+					elif [ "$TEMP" -lt "$T_low_warning_10" ]&&[ "$TEMP" -ge "$T_low_critical_10" ] ; then
+						output="WARNING - Temperature below warning threshold of "$T_low_warning"degC:  Temperature="$TEMP_DEC1"degC"
+						intReturn=$STATE_WARNING ;
+
+					elif [ "$TEMP" -lt "$T_low_warning_10" ]&&[ "$TEMP" -lt "$T_low_critical_10" ] ; then
+						output="CRITICAL - Temperature below critical threshold of "$T_low_critical"degC:  Temperature="$TEMP_DEC1"degC"
+						intReturn=$STATE_CRITICAL ;
+
+					else
+						output="Warning - ${MODEL_ID} Temperature alert thresholds are not correctly defined (must be: T_crit-low < T_warn-low < T_warn-high < T_crit-high).  Temperature="$TEMP_DEC1"degC"
+						intReturn=$STATE_WARNING
+					fi
+				else
+					output="WARNING - No ${MODEL_ID} Internal Temperature Information Returned"
+					intReturn=$STATE_WARNING
 				fi
 			fi
 		;;
