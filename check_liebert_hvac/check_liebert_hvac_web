@@ -11,7 +11,7 @@
 # "LIEBERT_GP_ENV.mib", "LIEBERT_GP_AGENT.mib", and "LIEBERT_GP_COND.mib" in order to resolve the requests.
 #
 # Usage:
-#	./check_liebert_hvac -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
+#	./check_liebert_hvac_web -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
 #
 #
 # 2023-06-26:  Version 1.0	\\ Alexander Pollak

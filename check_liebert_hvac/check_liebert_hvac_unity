@@ -1,0 +1,776 @@
+#!/bin/bash
+
+##
+#
+# receive status and current information from Liebert DS HVAC DS070ASAOEI
+#
+# you can get all snmp-options with:
+#	snmpwalk -m ALL -v 2c -c MYCOMMUNITY MYIPADDRESS  enterprises
+#
+# Note that you will need to install "LIEBERT_GP_REG.mib",
+# "LIEBERT_GP_ENV.mib", "LIEBERT_GP_AGENT.mib", and "LIEBERT_GP_COND.mib" in order to resolve the requests.
+#
+# Usage:
+#	./check_liebert_hvac_web -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
+#
+#
+# 2023-06-26:  Version 1.0	\\ Alexander Pollak
+#
+##
+
+
+SYSCONTACT=''
+SYSNAME=''
+SYSLOCATION=''
+
+
+SNMPVersion="2c"
+SNMPCommunity="public"
+SNMPTimeout="10"
+SNMPPort="161"
+
+# InfoList for DS070ASAOEI
+MIB_IDENTNAME="sysDescr.0"
+MIB_IDENTLOCATION="sysLocation.0"
+MIB_IDENTCONTACT="sysContact.0"
+MIB_IDENTCOMFIRM="lgpAgentIdentFirmwareVersion.0"
+MIB_IDENTCOMMODEL="lgpAgentIdentModel.0"
+MIB_IDENTACMODEL="lgpFlexible.20.1.20.1.2.1.4240"
+MIB_UPTIME="sysUpTimeInstance"
+
+
+# VarList for DS070ASAOEI
+
+MIB_COMP1RUNTIME="lgpEnvStatisticsComp1RunHr.0"
+MIB_COMP2RUNTIME="lgpEnvStatisticsComp2RunHr.0"
+
+MIB_COMP1TEMP="lgpEnvTemperatureMeasurementTenthsDegC.7"
+MIB_COMP2TEMP="lgpEnvTemperatureMeasurementTenthsDegC.8"
+
+MIB_HUMIDIFYRUNTIME="lgpEnvStatisticsHumidifyModeHrs.0"
+MIB_DEHUMIDIFYRUNTIME="lgpEnvStatisticsDehumidifyModeHrs.0"
+
+
+MIB_RETURNAIR_TEMP="lgpEnvTemperatureMeasurementTenthsDegC.3"
+
+
+
+
+MIB_HEATER1RUNTIME="lgpEnvStatisticsReheat1RunHr.0"
+MIB_HEATER2RUNTIME="lgpEnvStatisticsReheat2RunHr.0"
+MIB_HEATER3RUNTIME="lgpEnvStatisticsReheat3RunHr.0"
+
+
+MIB_TEMP_SET="lgpEnvTemperatureSetPointTenthsDegC.1"
+MIB_RETURNAIR_TEMP="lgpEnvTemperatureMeasurementTenthsDegC.3"
+MIB_TEMP_HIGH_CONTROL="lgpEnvTemperatureHighThresholdTenthsDegC.3"
+MIB_TEMP_LOW_CONTROL="lgpEnvTemperatureLowThresholdTenthsDegC.3"
+
+
+
+MIB_HUMIDITYSET="lgpEnvHumiditySetPoint.1"
+MIB_RETURNAIR_HUMIDITY="lgpEnvHumidityMeasurementRelTenths.1"
+MIB_HUMIDITY_HIGH_CONTROL="lgpEnvHumidityHighThresholdRelTenths.1"
+MIB_HUMIDITY_LOW_CONTROL="lgpEnvHumidityLowThresholdRelTenths.1"
+
+
+
+MIB_SYSTEMSTATUS="lgpEnvStateSystem.0"            # 1=on 2=off 3=standby
+MIB_SYSTEMCOOLING="lgpEnvStateCooling.0"          # 1=on 2=off
+MIB_SYSTEMHUMIDITY="lgpEnvStateHumidifying.0"     # 1=on 2=off
+MIB_SYSTEMDEHUMIDITY="lgpEnvStateDehumidifying.0" # 1=on 2=off
+MIB_SYSTEMFAN="lgpEnvStateFan.0"                  # 1=on 2=off
+
+MIB_SYSTEMALARM="lgpEnvStateOperatingReason.0" # 3=on 1=off
+
+MIB_SYSTEMCOOLINGCAPACITY="lgpEnvStateCoolingCapacity.0"
+MIB_SYSTEMHEATINGCAPACITY="lgpEnvStateHeatingCapacity.0"
+
+
+# Default Values for HVAC Compressor Temperature Warning and Critical Checks:
+
+CWarning="120"   # Temperature in deg C
+CCritical="130"  # Temperature in deg C
+
+
+# nagios return values
+export STATE_OK=0
+export STATE_WARNING=1
+export STATE_CRITICAL=2
+export STATE_UNKNOWN=3
+export STATE_DEPENDENT=4
+
+intReturn=$STATE_OK
+
+usage()
+{
+	echo "usage: ./check_liebert_hvac -h [hostname] -c [community] -s [check]"
+	echo "options:"
+	echo "	-h  [snmp hostname]       Hostname"
+	echo "	-c  [community name]      community name (ex: public)"
+	echo "	-p  [snmp port]           port for snmp request (default: 161)"
+	echo "	-t  [timeout]	          duration before doing an timeout in seconds - default 10s"
+	echo ""
+	echo "	-s  [check]               Check to be executed"
+	echo "	    info                  System infos"
+	echo "	    runtime               Show Runtime: [Comp1, Comp2, Heater, Humidify, Dehumidify]"
+	echo "	    hvac_status           Check HVAC Status: [System, Cooling, Heating, Fan, Humidify, Dehumidify]"
+	echo "	    hvac_alarm            Check HVAC Alarm: [Alarm]"
+	echo "	    hvac_capacity         Check Current Capacity: [Cooling, Heating]"
+	echo "	    hvac_temp_control     Check Current Return Temp: [Measured Temp, Setpoint Temp]"
+	echo "	    hvac_humidity_control Check Current Return Humidity: [Measured Humidity, Setpoint Humidity]"
+	echo "	    comp_temp             Check Compressor Temparature: [Comp1, Comp2]"
+	echo ""
+	echo "	-C  [Comp. temp warning]    Threshold for Compressor High Temperature Warning [Default:120degC]"
+	echo "	-D  [Comp. temp critical]   Threshold for Compressor High Temperature Critical [Default:130degC]"
+	echo ""
+	echo "examples:	./check_liebert_hvac -h 1.2.3.4 -c public -s info"
+	echo "		./check_liebert_hvac -h 1.2.3.4 -p 4321 -c public -s runtime "
+	echo "		./check_liebert_hvac -h 1.2.3.4 -c public -s comp_temp -C 100 -D 110"
+	exit 3
+}
+
+if [ "$1" == "--help" ]; then
+	usage; exit 0
+fi
+
+while getopts c:h:p:s:t:C:D: OPTNAME; do
+	case "$OPTNAME" in
+	h)	hostname="$OPTARG";;
+	c)	SNMPCommunity="$OPTARG";;
+	p)	SNMPPort="$OPTARG";;
+	s)	status="$OPTARG";;
+	t)	SNMPTimeout="$OPTARG";;
+	C)	CWarning="$OPTARG";;
+	D)	CCritical="$OPTARG";;
+	esac
+done
+
+
+function up_time {
+	time=$1
+	pre=$2
+	suf=$3
+	up=$4
+	#returns uptime as human readable string
+	if [[ $time =~ (.*):(.*):(.*):(.*)\.(.*) ]]; then
+		DAYS=${BASH_REMATCH[1]}
+		HOURS=${BASH_REMATCH[2]}
+		MINUTES=${BASH_REMATCH[3]}
+		SECONDS=${BASH_REMATCH[4]}
+		MILLISECONDS=${BASH_REMATCH[5]}
+
+		output=$output"$pre$DAYS days $HOURS hours $MINUTES minutes$suf"
+		if [ $DAYS == "0" ] && [ $HOURS == "0" ] && [ $MINUTES -lt "5" ]; then
+			intReturn=$STATE_CRITICAL
+			if [ "$up" != '' ]; then
+				output=$up"$pre$DAYS days $HOURS hours $MINUTES minutes$suf"$output
+			fi
+		else
+			if [ $intReturn -lt $STATE_CRITICAL ] && [ $DAYS == "0" ] && [ $HOURS == "0" ] && [ $MINUTES -lt "15" ]; then
+				intReturn=$STATE_WARNING
+				if [ "$up" != '' ]; then
+					output=$up"$pre$DAYS days $HOURS hours $MINUTES minutes$suf"$output
+				fi
+			fi
+		fi
+	fi
+}
+
+function get_timestamp {
+	t=$1
+	if [[ $t =~ (.*):(.*):(.*):(.*)\.(.*) ]]; then
+		DAYS=${BASH_REMATCH[1]}
+		HOURS=${BASH_REMATCH[2]}
+		MINUTES=${BASH_REMATCH[3]}
+		SECONDS=${BASH_REMATCH[4]}
+		MILLISECONDS=${BASH_REMATCH[5]}
+		
+		ALL=$((10#$DAYS*24*60*60*1000 + 10#$HOURS*60*60*1000 + 10#$MINUTES*60*1000 + 10#$SECONDS*1000 + 10#$MILLISECONDS))
+		echo $ALL
+	fi
+	
+}
+
+function sub_time {
+	t1=$1
+	t2=$2;
+	#substracts one uptime from another
+	T1ALL=$(get_timestamp $t1)
+	T2ALL=$(get_timestamp $t2)
+	if [[ T1ALL != '' && T2ALL != '' ]]; then
+		TS=$((T1ALL - T2ALL))
+		DAYS=$(($TS/(24*60*60*1000)))
+		TS=$(($TS-($DAYS*24*60*60*1000)))
+		HOURS=$(($TS/(60*60*1000)))
+		TS=$(($TS-($HOURS*60*60*1000)))
+		MINUTES=$(($TS/(60*1000)))
+		TS=$(($TS-($MINUTES*60*1000)))
+		SECONDS=$(($TS/(1000)))
+		MILLSECONDS=$(($TS-$SECONDS))
+		echo "$DAYS:$HOURS:$MINUTES:$SECONDS.$MILLISECONDS"
+	else
+		echo 'ERROR'
+	fi
+}
+
+
+
+if [ "$hostname" = "" ] || [ "$SNMPCommunity" = "" ] ; then
+	usage
+else
+	SNMPArgs=" -v $SNMPVersion -c $SNMPCommunity -t $SNMPTimeout $hostname:$SNMPPort"
+
+	case "$status" in
+
+		info)
+			# General Information for HVAC
+			info=`snmpget $SNMPArgs $MIB_IDENTNAME $MIB_IDENTLOCATION $MIB_IDENTCONTACT $MIB_IDENTCOMMODEL $MIB_IDENTCOMFIRM $MIB_IDENTACMODEL $MIB_UPTIME 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				COMMODEL=$(echo "$info" | grep "$MIB_IDENTCOMMODEL" | sed 's/.*STRING: \(.*\).*/\1/')
+				COMFIRM=$(echo "$info" | grep "$MIB_IDENTCOMFIRM" | sed 's/.*STRING: \(.*\).*/\1/')
+				ACMODEL=$(echo "$info" | grep "$MIB_IDENTACMODEL" | sed 's/.*STRING: \(.*\).*/\1/')
+				SYSCONTACT=$(echo "$info" | grep "$MIB_IDENTCONTACT" | sed 's/.*STRING: \(.*\).*/\1/')
+				SYSNAME=$(echo "$info" | grep "$MIB_IDENTNAME" | sed 's/.*STRING: \(.*\).*/\1/')
+				SYSLOCATION=$(echo "$info" | grep "$MIB_IDENTLOCATION" | sed 's/.*STRING: \(.*\).*/\1/')
+				UPTIME=$(echo "$info" | grep "$MIB_UPTIME" |  sed 's/.*) \(.*\).*/\1/' | sed 's/ days, /:/g')
+	
+				if [ "$COMMODEL" != "" ] ; then
+					output=$output"Communication Card Model - $COMMODEL\n"
+				fi
+				if [ "$COMFIRM" != "" ] ; then
+					output=$output"Communication Card Firmware Version - $COMFIRM\n"
+				fi
+				if [ "$ACMODEL" != "" ] ; then
+					output=$output"HVAC Model - $ACMODEL\n"
+				fi
+				if [ "$SYSCONTACT" != "" ] ; then
+					output=$output"Contact - $SYSCONTACT\n"
+				fi
+				if [ "$SYSNAME" != "" ] ; then
+					output=$output"Name - $SYSNAME\n"
+				fi
+				if [ "$SYSLOCATION" != "" ] ; then
+					output=$output"Location - $SYSLOCATION\n"
+				fi
+				if [ "$UPTIME" != "" ] ; then
+					up_time $UPTIME 'Uptime - '
+					output=$output"\n"
+				fi
+				if [ "$output" == "" ] ; then
+					output="No information returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+
+
+		runtime)
+	  		# HVAC check runtime hours
+			runtime=`snmpget $SNMPArgs $MIB_COMP1RUNTIME $MIB_COMP2RUNTIME $MIB_HUMIDIFYRUNTIME $MIB_DEHUMIDIFYRUNTIME $MIB_HEATER1RUNTIME $MIB_HEATER2RUNTIME $MIB_HEATER3RUNTIME`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				COMP1RUNTIME=$(echo "$runtime" | grep "$MIB_COMP1RUNTIME" | sed 's/.*Gauge32: \(.*\).* hours/\1/' )
+				COMP2RUNTIME=$(echo "$runtime" | grep "$MIB_COMP2RUNTIME" | sed 's/.*Gauge32: \(.*\).* hours/\1/' )
+				HUMIDIFYRUNTIME=$(echo "$runtime" | grep "$MIB_HUMIDIFYRUNTIME" | sed 's/.*Gauge32: \(.*\).* hours/\1/' )
+				DEHUMIDIFYRUNTIME=$(echo "$runtime" | grep "$MIB_DEHUMIDIFYRUNTIME" | sed 's/.*Gauge32: \(.*\).* hours/\1/' )
+
+				HEATER1RUNTIME=$(echo "$runtime" | grep "$MIB_HEATER1RUNTIME" | sed 's/.*Gauge32: \(.*\).* hours/\1/' )
+				HEATER2RUNTIME=$(echo "$runtime" | grep "$MIB_HEATER2RUNTIME" | sed 's/.*Gauge32: \(.*\).* hours/\1/' )
+				HEATER3RUNTIME=$(echo "$runtime" | grep "$MIB_HEATER3RUNTIME" | sed 's/.*Gauge32: \(.*\).* hours/\1/' )
+
+				if [ "$COMP1RUNTIME" != "" ]&&[ "$COMP2RUNTIME" != "" ]&&[ "$HUMIDIFYRUNTIME" != "" ]&&[ "$DEHUMIDIFYRUNTIME" != "" ]&&[ "$HEATER1RUNTIME" != "" ]&&[ "$HEATER2RUNTIME" != "" ]&&[ "$HEATER3RUNTIME" != "" ] ; then
+
+					output="HVAC Runtimes -  Comp1.="$COMP1RUNTIME"h  -  Comp2.="$COMP2RUNTIME"h  -  Humidifier="$HUMIDIFYRUNTIME"h  -  Dehumidifier="$DEHUMIDIFYRUNTIME"h  -  Heater1="$HEATER1RUNTIME"h  -  Heater2="$HEATER2RUNTIME"h  -  Heater3="$HEATER3RUNTIME"h"
+					intReturn=$STATE_OK ;
+				
+				else
+					output="WARNING - No HVAC Runtime Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+
+
+
+		hvac_status)
+	  		# Check Status of HVAC
+			status=`snmpget $SNMPArgs $MIB_SYSTEMSTATUS $MIB_SYSTEMCOOLING $MIB_SYSTEMHUMIDITY $MIB_SYSTEMDEHUMIDITY $MIB_SYSTEMFAN`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				SYSTEMSTATUS=$(echo "$status" | grep "$MIB_SYSTEMSTATUS" | sed 's/.*(\(.*\)).*/\1/' )
+				SYSTEMCOOLING=$(echo "$status" | grep "$MIB_SYSTEMCOOLING" | sed 's/.*(\(.*\)).*/\1/' )
+				SYSTEMHUMIDITY=$(echo "$status" | grep "$MIB_SYSTEMHUMIDITY" | sed 's/.*(\(.*\)).*/\1/' )
+				SYSTEMDEHUMIDITY=$(echo "$status" | grep "$MIB_SYSTEMDEHUMIDITY" | sed 's/.*(\(.*\)).*/\1/' )
+				SYSTEMFAN=$(echo "$status" | grep "$MIB_SYSTEMFAN" | sed 's/.*(\(.*\)).*/\1/' )
+
+
+				if [ "$SYSTEMSTATUS" != "" ]&&[ "$SYSTEMCOOLING" != "" ]&&[ "$SYSTEMHUMIDITY" != "" ]&&[ "$SYSTEMDEHUMIDITY" != "" ]&&[ "$SYSTEMFAN" != "" ] ; then
+					
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="WARNING - HVAC Status: Unit=ON - Cooling=ON - Humidify=ON - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=ON - Cooling=ON - Humidify=ON - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="OK - HVAC Status: Unit=ON - Cooling=ON - Humidify=ON - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=ON - Cooling=ON - Humidify=ON - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="OK - HVAC Status: Unit=ON - Cooling=ON - Humidify=OFF - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=ON - Cooling=ON - Humidify=OFF - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="OK - HVAC Status: Unit=ON - Cooling=ON - Humidify=OFF - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=ON - Cooling=ON - Humidify=OFF - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="WARNING - HVAC Status: Unit=ON - Cooling=OFF - Humidify=ON - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=ON - Cooling=OFF - Humidify=ON - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="OK - HVAC Status: Unit=ON - Cooling=OFF - Humidify=ON - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=ON - Cooling=OFF - Humidify=ON - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="OK - HVAC Status: Unit=ON - Cooling=OFF - Humidify=OFF - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=ON - Cooling=OFF - Humidify=OFF - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="OK - HVAC Status: Unit=ON - Cooling=OFF - Humidify=OFF - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$SYSTEMSTATUS" == "1" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=ON - Cooling=OFF - Humidify=OFF - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					
+
+
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=ON - Humidify=ON - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=ON - Humidify=ON - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=ON - Humidify=ON - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=ON - Humidify=ON - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=OFF - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=ON - Humidify=OFF - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=ON - Humidify=OFF - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=ON - Humidify=OFF - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=ON - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=ON - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=ON - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=ON - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=OFF - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=OFF - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=OFF - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "2" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=OFF - Cooling=OFF - Humidify=OFF - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+
+
+
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=ON - Humidify=ON - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=ON - Humidify=ON - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=ON - Humidify=ON - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=ON - Humidify=ON - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=OFF - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=ON - Humidify=OFF - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=ON - Humidify=OFF - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "1" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=ON - Humidify=OFF - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=ON - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=ON - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=ON - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "1" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=ON - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=OFF - Dehumidify=ON - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "1" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=OFF - Dehumidify=ON - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "1" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=OFF - Dehumidify=OFF - FAN=ON"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMSTATUS" == "3" ]&&[ "$SYSTEMCOOLING" == "2" ]&&[ "$SYSTEMHUMIDITY" == "2" ]&&[ "$SYSTEMDEHUMIDITY" == "2" ]&&[ "$SYSTEMFAN" == "2" ] ; then
+						
+						output="CRITICAL - HVAC Status: Unit=STANDBY - Cooling=OFF - Humidify=OFF - Dehumidify=OFF - FAN=OFF"
+						intReturn=$STATE_CRITICAL ;
+					fi
+
+				else
+					output="WARNING - No HVAC Status Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+
+
+
+
+
+
+		hvac_alarm)
+	  		# Check Alarm State of HVAC
+			alarm=`snmpget $SNMPArgs $MIB_SYSTEMALARM`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				SYSTEMALARM=$(echo "$alarm" | grep "$MIB_SYSTEMALARM" | sed 's/.*(\(.*\)).*/\1/' )
+
+				if [ "$SYSTEMALARM" != "" ] ; then
+					
+					if [ "$SYSTEMALARM" == "3" ] ; then
+						
+						output="CRITICAL - HVAC: In Alarm State"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMALARM" == "1" ] ; then
+						
+						output="OK - HVAC: No Alarms Present"
+						intReturn=$STATE_OK ;
+					fi
+				else
+					output="WARNING - No HVAC Alarm Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+
+
+
+		hvac_capacity)
+	  		# UPS check HVAC capacity
+			capacity=`snmpget $SNMPArgs $MIB_SYSTEMCOOLINGCAPACITY $MIB_SYSTEMHEATINGCAPACITY`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				SYSTEMCOOLINGCAPACITY=$(echo "$capacity" | grep "$MIB_SYSTEMCOOLINGCAPACITY" | sed 's/.*Gauge32: \(.*\).* percent/\1/' )
+				SYSTEMHEATINGCAPACITY=$(echo "$capacity" | grep "$MIB_SYSTEMHEATINGCAPACITY" | sed 's/.*Gauge32: \(.*\).* percent/\1/' )
+				
+
+				if [ "$SYSTEMCOOLINGCAPACITY" != "" ]&&[ "$SYSTEMHEATINGCAPACITY" != "" ] ; then
+					
+					output="OK - Current HVAC Capacity:  Cooling="$SYSTEMCOOLINGCAPACITY"%  Heating="$SYSTEMHEATINGCAPACITY"%"
+					intReturn=$STATE_OK ;
+	
+				else
+					output="WARNING - No HVAC Capacity Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+
+
+		hvac_temp_control)
+	  		# Check Return Temperature VS Setpoint Temp
+			return=`snmpget $SNMPArgs $MIB_TEMP_SET $MIB_TEMP_HIGH_CONTROL $MIB_TEMP_LOW_CONTROL $MIB_RETURNAIR_TEMP 2> /dev/null`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				TEMP_SET=$(echo "$return" | grep "$MIB_TEMP_SET" | sed 's/.*INTEGER: \(.*\) .1 degrees Celsius.*/\1/' )
+				TEMP_HIGH_CONTROL=$(echo "$return" | grep -m 1 "$MIB_TEMP_HIGH_CONTROL" | sed 's/.*INTEGER: \(.*\) .1 degrees Celsius.*/\1/' )
+				TEMP_LOW_CONTROL=$(echo "$return" | grep -m 1 "$MIB_TEMP_LOW_CONTROL" | sed 's/.*INTEGER: \(.*\) .1 degrees Celsius.*/\1/' )
+				RETURNAIR_TEMP=$(echo "$return" | grep -m 1 "$MIB_RETURNAIR_TEMP" | sed 's/.*INTEGER: \(.*\) .1 degrees Celsius.*/\1/' )
+
+
+				if [ "$RETURNAIR_TEMP" != "" ]&&[ "$TEMP_SET" != "" ]&&[ "$TEMP_HIGH_CONTROL" != "" ]&&[ "$TEMP_LOW_CONTROL" != "" ] ; then
+					
+					if [ "$RETURNAIR_TEMP" -le "$TEMP_HIGH_CONTROL" ]&&[ "$RETURNAIR_TEMP" -ge "$TEMP_LOW_CONTROL" ] ; then
+						TEMP_SET_C=$(echo "scale=1;$TEMP_SET/ 10" | bc)
+						RETURNAIR_TEMP_C=$(echo "scale=1;$RETURNAIR_TEMP/ 10" | bc)
+						output="OK - Temperature Setpoint="$TEMP_SET_C"degC  -  Return Air="$RETURNAIR_TEMP_C"degC"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$RETURNAIR_TEMP" -gt "$TEMP_HIGH_CONTROL" ]&&[ "$RETURNAIR_TEMP" -gt "$TEMP_LOW_CONTROL" ] ; then
+						TEMP_HIGH_CONTROL_C=$(echo "scale=1;$TEMP_HIGH_CONTROL/ 10" | bc)
+						RETURNAIR_TEMP_C=$(echo "scale=1;$RETURNAIR_TEMP/ 10" | bc)
+						output="CRITICAL - Temperature above critical threshold of "$TEMP_HIGH_CONTROL_C"degC: Return Air="$RETURNAIR_TEMP_C"degC"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$RETURNAIR_TEMP" -lt "$TEMP_HIGH_CONTROL" ]&&[ "$RETURNAIR_TEMP" -lt "$TEMP_LOW_CONTROL" ] ; then
+						TEMP_LOW_CONTROL_C=$(echo "scale=1;$TEMP_LOW_CONTROL/ 10" | bc)
+						RETURNAIR_TEMP_C=$(echo "scale=1;$RETURNAIR_TEMP/ 10" | bc)
+						output="WARNING - Temperature below warning threshold of "$TEMP_LOW_CONTROL_C"degC: Return Air="$RETURNAIR_TEMP_C"degC"
+						intReturn=$STATE_WARNING ;
+					fi
+				else
+					output="WARNING - No HVAC Return Air Temperature Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+		hvac_humidity_control)
+	  		# Check Humidity Return Air VS Setpoint
+			humidity=`snmpget $SNMPArgs $MIB_HUMIDITYSET $MIB_HUMIDITY_HIGH_CONTROL $MIB_HUMIDITY_LOW_CONTROL $MIB_RETURNAIR_HUMIDITY`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				HUMIDITYSET=$(echo "$humidity" | grep "$MIB_HUMIDITYSET" | sed 's/.*INTEGER: \(.*\) percent Relative Humidity.*/\1/'  )
+				HUMIDITY_HIGH_CONTROL=$(echo "$humidity" | grep "$MIB_HUMIDITY_HIGH_CONTROL" | sed 's/.*INTEGER: \(.*\) .1 percent Relative Humidity.*/\1/'  )
+				HUMIDITY_LOW_CONTROL=$(echo "$humidity" | grep "$MIB_HUMIDITY_LOW_CONTROL" | sed 's/.*INTEGER: \(.*\) .1 percent Relative Humidity.*/\1/'  )
+				RETURNAIR_HUMIDITY=$(echo "$humidity" | grep "$MIB_RETURNAIR_HUMIDITY" | sed 's/.*INTEGER: \(.*\) .1 percent Relative Humidity.*/\1/'  )
+
+				if [ "$HUMIDITYSET" != "" ]&&[ "$HUMIDITY_HIGH_CONTROL" != "" ]&&[ "$HUMIDITY_LOW_CONTROL" != "" ]&&[ "$RETURNAIR_HUMIDITY" != "" ] ; then
+
+					if [ "$RETURNAIR_HUMIDITY" -le "$HUMIDITY_HIGH_CONTROL" ]&&[ "$RETURNAIR_HUMIDITY" -ge "$HUMIDITY_LOW_CONTROL" ]  ; then
+						RETURNAIR_HUMIDITY_01=$(echo "scale=1;$RETURNAIR_HUMIDITY/ 10" | bc)
+						output="OK - Humidity Setpoint="$HUMIDITYSET"% - Return Air="$RETURNAIR_HUMIDITY_01"%"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$RETURNAIR_HUMIDITY" -gt "$HUMIDITY_HIGH_CONTROL" ]&&[ "$RETURNAIR_HUMIDITY" -gt "$HUMIDITY_LOW_CONTROL" ] ; then
+						RETURNAIR_HUMIDITY_01=$(echo "scale=1;$RETURNAIR_HUMIDITY/ 10" | bc)
+						HUMIDITY_HIGH_CONTROL_01=$(echo "scale=1;$HUMIDITY_HIGH_CONTROL/ 10" | bc)
+						output="WARNING - Humidity above high threshold of "$HUMIDITY_HIGH_CONTROL_01"%: Return Air="$RETURNAIR_HUMIDITY_01"% "
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$RETURNAIR_HUMIDITY" -lt "$HUMIDITY_HIGH_CONTROL" ]&&[ "$RETURNAIR_HUMIDITY" -lt "$HUMIDITY_LOW_CONTROL" ] ; then
+						RETURNAIR_HUMIDITY_01=$(echo "scale=1;$RETURNAIR_HUMIDITY/ 10" | bc)
+						HUMIDITY_LOW_CONTROL_01=$(echo "scale=1;$HUMIDITY_LOW_CONTROL/ 10" | bc)
+						output="WARNING - Humidity below low threshold of "$HUMIDITY_LOW_CONTROL_01"%: Return Air="$RETURNAIR_HUMIDITY_01"%"
+						intReturn=$STATE_WARNING ;
+					fi
+				else
+					output="WARNING - No HVAC Return Air Humidity Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+
+		comp_temp)
+	  		# Check HVAC Compressor Temperature
+			comp=`snmpget $SNMPArgs $MIB_COMP1TEMP $MIB_COMP2TEMP`
+			if [ "$?" != "0" ] ; then
+				output=$output="CRITICAL - Problem with SNMP request, check user/password/host"
+				intReturn=$STATE_CRITICAL ;
+			else
+
+				COMP1TEMP=$(echo "$comp" | grep "$MIB_COMP1TEMP" | sed 's/.*INTEGER: \(.*\) .1 degrees Celsius.*/\1/' )
+				COMP2TEMP=$(echo "$comp" | grep "$MIB_COMP2TEMP" | sed 's/.*INTEGER: \(.*\) .1 degrees Celsius.*/\1/' )
+
+				CWarning_10=$(echo $((CWarning * 10)))
+				CCritical_10=$(echo $((CCritical * 10)))
+
+				if [ "$COMP1TEMP" != "" ]&&[ "$COMP2TEMP" != "" ] ; then
+					
+					if [ "$COMP1TEMP" -le "$CWarning_10" ]&&[ "$COMP2TEMP" -le "$CWarning_10" ]  ; then
+						COMP1TEMP_01=$(echo "scale=1;$COMP1TEMP/ 10" | bc)
+						COMP2TEMP_01=$(echo "scale=1;$COMP2TEMP/ 10" | bc)
+						output="OK - Comp.1="$COMP1TEMP_01"degC  -  Comp.2="$COMP2TEMP_01"degC"
+						intReturn=$STATE_OK ;
+					fi
+					if [ "$COMP1TEMP" -le "$CCritical_10" ]&&[ "$COMP2TEMP" -le "$CCritical_10" ]  ; then
+						if [ "$COMP1TEMP" -gt "$CWarning_10" ]||[ "$COMP2TEMP" -gt "$CWarning_10" ] ; then
+							COMP1TEMP_01=$(echo "scale=1;$COMP1TEMP/ 10" | bc)
+						  COMP2TEMP_01=$(echo "scale=1;$COMP2TEMP/ 10" | bc)
+							output="WARNING - Compressor Temperature above warning threshold of "$CWarning"degC:  Comp.1="$COMP1TEMP_01"degC  -  Comp.2="$COMP2TEMP_01"degC"
+							intReturn=$STATE_WARNING ;
+						fi	
+					fi
+					if [ "$COMP1TEMP" -gt "$CCritical_10" ]||[ "$COMP2TEMP" -gt "$CCritical_10" ]  ; then
+						COMP1TEMP_01=$(echo "scale=1;$COMP1TEMP/ 10" | bc)
+						COMP2TEMP_01=$(echo "scale=1;$COMP2TEMP/ 10" | bc)
+						output="CRITICAL - Compressor Temperature above critical threshold of "$CCritical"degC:  Comp.1="$COMP1TEMP_01"degC  -  Comp.2="$COMP2TEMP_01"degC"
+						intReturn=$STATE_CRITICAL ;
+					fi
+				else
+					output="WARNING - No HVAC Compressor Temparature Information Returned"
+					intReturn=$STATE_WARNING
+				fi
+			fi
+		;;
+
+		
+
+	esac
+
+	echo -e $output
+	exit $intReturn
+fi
