@@ -220,7 +220,8 @@ if [ "$hostname" = "" ] || [ "$SNMPCommunity" = "" ] ; then
 	usage
 else
 	SNMPArgs=" -v $SNMPVersion -c $SNMPCommunity -t $SNMPTimeout $hostname:$SNMPPort"
-
+  intReturn=$STATE_CRITICAL
+  
 	case "$status" in
 
 		info)
