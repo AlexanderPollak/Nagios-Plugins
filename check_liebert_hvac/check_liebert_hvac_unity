@@ -81,7 +81,7 @@ MIB_SYSTEMHUMIDITY="lgpEnvStateHumidifying.0"     # 1=on 2=off
 MIB_SYSTEMDEHUMIDITY="lgpEnvStateDehumidifying.0" # 1=on 2=off
 MIB_SYSTEMFAN="lgpEnvStateFan.0"                  # 1=on 2=off
 
-MIB_SYSTEMALARM="lgpEnvStateOperatingReason.0" # 3=on 1=off
+MIB_SYSTEMALARM="lgpSysState.0" # 1=Normal 2=StartUp 3=normalwithWarning 4=normalwithAlarm 5=abnormalOperation
 
 MIB_SYSTEMCOOLINGCAPACITY="lgpEnvStateCoolingCapacity.0"
 MIB_SYSTEMHEATINGCAPACITY="lgpEnvStateHeatingCapacity.0"
@@ -221,7 +221,7 @@ if [ "$hostname" = "" ] || [ "$SNMPCommunity" = "" ] ; then
 else
 	SNMPArgs=" -v $SNMPVersion -c $SNMPCommunity -t $SNMPTimeout $hostname:$SNMPPort"
   intReturn=$STATE_CRITICAL
-  
+
 	case "$status" in
 
 		info)
@@ -594,11 +594,26 @@ else
 				SYSTEMALARM=$(echo "$alarm" | grep "$MIB_SYSTEMALARM" | sed 's/.*(\(.*\)).*/\1/' )
 
 				if [ "$SYSTEMALARM" != "" ] ; then
-					
-					if [ "$SYSTEMALARM" == "3" ] ; then
+
+					if [ "$SYSTEMALARM" == "5" ] ; then
+
+						output="CRITICAL - HVAC: Abnormal State"
+						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMALARM" == "4" ] ; then
 						
 						output="CRITICAL - HVAC: In Alarm State"
 						intReturn=$STATE_CRITICAL ;
+					fi
+					if [ "$SYSTEMALARM" == "3" ] ; then
+
+						output="CRITICAL - HVAC: In Warning State"
+						intReturn=$STATE_WARNING ;
+					fi
+					if [ "$SYSTEMALARM" == "2" ] ; then
+
+						output="UNKNOWN - HVAC: In Start Up State"
+						intReturn=$STATE_UNKNOWN ;
 					fi
 					if [ "$SYSTEMALARM" == "1" ] ; then
 						
