@@ -15,7 +15,7 @@
 # Tested with AVAGO 3108 MegaRAID / PERC H330 Mini
 #---------------------------------------------------
 #
-# 2023-07-13:  Version 1.3	\\ Alexander Pollak
+# 2023-07-13:  Version 1.4	\\ Alexander Pollak
 #
 ##
 
@@ -403,6 +403,9 @@ else
 						# each RAID table entry provides 14 variables: [EID:Slt, DID, State, DG, Size, Unit, Intf, Med, SED, PI, SeSz, Model, Sp, Type]
 						# in some cases the disk model has a space, which adds an extra entry, hence the separation below to adjust for it. 
 						# Currently two disk models are used in the raid, so we distingush between "TOSHIBA" and other models.
+
+						# in addition newer disks also have 4 KB sectors compared to 512B sectors, for the 4 KB sectors there is again a space which needs to be taken into account.
+						# hence the second consideration for the sector size
 						j=1
 						for data in ${DGinfo[$i]}; do
   							DGdata[$i,$j]=$data
@@ -411,20 +414,44 @@ else
 						index=0
 						# Convert in Individual Variables
 						for k in `seq 1 ${DGcount[$i]}`; do		
-							if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
-							DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							index=$(($index+15))
-							else	
-							DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							index=$(($index+14))
+							# KB in disk sector size
+							if [ ${DGdata[$i,(12 + $index)]} == "KB" ] ; then
+							  # any other disk manufacturer that has the name in the serial number section
+							  if [ ${DGdata[$i,(13 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(13 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(13 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(13 + $index)]} == "WDC" ] ; then
+							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							  index=$(($index+16))
+							  # Seagate disk manufacturer that only the serial number in the serial number section
+							  else
+							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							  index=$(($index+15))
+							  fi
+						  # no KB in disk sector size
+						  else
+						    # any other disk manufacturer that has the name in the serial number section
+						    if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
+							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							  index=$(($index+15))
+							  # Seagate disk manufacturer that only the serial number in the serial number section
+							  else
+							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							  index=$(($index+14))
+							  fi
 							fi
 						done
 					
@@ -496,6 +523,9 @@ else
 						# each RAID table entry provides 14 variables: [EID:Slt, DID, State, DG, Size, Unit, Intf, Med, SED, PI, SeSz, Model, Sp, Type]
 						# in some cases the disk model has a space, which adds an extra entry, hence the separation below to adjust for it. 
 						# Currently two disk models are used in the raid, so we distingush between "TOSHIBA" and other models.
+
+						# in addition newer disks also have 4 KB sectors compared to 512B sectors, for the 4 KB sectors there is again a space which needs to be taken into account.
+						# hence the second consideration for the sector size
 						j=1
 						for data in ${DGinfo[$i]}; do
   							DGdata[$i,$j]=$data
@@ -503,21 +533,45 @@ else
 						done
 						index=0
 						# Convert in Individual Variables
-						for k in `seq 1 ${DGcount[$i]}`; do		
-							if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
-							DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							index=$(($index+15))
-							else	
-							DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							index=$(($index+14))
+						for k in `seq 1 ${DGcount[$i]}`; do
+							# KB in disk sector size
+							if [ ${DGdata[$i,(12 + $index)]} == "KB" ] ; then
+							  # any other disk manufacturer that has the name in the serial number section
+							  if [ ${DGdata[$i,(13 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(13 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(13 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(13 + $index)]} == "WDC" ] ; then
+							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							  index=$(($index+16))
+							  # Seagate disk manufacturer that only the serial number in the serial number section
+							  else
+							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							  index=$(($index+15))
+							  fi
+						  # no KB in disk sector size
+						  else
+						    # any other disk manufacturer that has the name in the serial number section
+						    if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
+							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							  index=$(($index+15))
+							  # Seagate disk manufacturer that only the serial number in the serial number section
+							  else
+							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							  index=$(($index+14))
+							  fi
 							fi
 						done
 					
