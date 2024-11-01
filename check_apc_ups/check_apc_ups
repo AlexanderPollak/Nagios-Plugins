@@ -3,16 +3,17 @@
 ##
 # Receive status and current information about Schneider APC Smart-UPS
 #
-# You can get all snmp-options with:
-#   snmpwalk -m ALL -v 1 -c MYCOMMUNITY MYIPADDRESS
 #
-# No additional MIB needed
+# you can get all snmp-options with:
+#	snmpwalk -m ALL -v 2c -c MYCOMMUNITY MYIPADDRESS  apc
+#
+# Note that you will need to install "PowerNet-MIB.mib" in order to resolve the requests.
 #
 # Usage:
 #   ./check_apc_ups -h IP-ADDRESS -c SNMP-COMMUNITY -s STATUSCHECK
 #
 #
-# 2024-05-01: Version 1.0  \\ Marc Jacquart
+# 2024-11-01: Version 1.1  \\ Alexander Pollak
 #
 ##
 

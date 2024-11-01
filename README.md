@@ -4,11 +4,12 @@ This Repository contains a number of Nagios Plugins tested with Nagios Core 4.4.
 # List of Plugins:
 ```
 - Check APC Power Distribution Units
+- Check APC Uninterrupted Power Supply
 - Check Liebert HVAC
-- Check Mitsubishi UPS
+- Check Mitsubishi Uninterrupted Power Supply
 - Check Netgear NAS
 - Check Netgear Switch
-- Check Avtech RoomAlert 12S
+- Check Avtech RoomAlert 12S / 32S
 - Check Disk Health: smartctl
 - Check Raid Controller: storcli
 - Check Supermicro Hardware IPMI
