@@ -64,8 +64,8 @@ temp_crit="60" # Critical if T>60C
 load_warn="75" # Warning if load >75%
 load_crit="85" # Critical if load >85%
 
-V_low_warn="115" # Warning if input/output voltage <115V
-V_low_crit="110" # Critical if input/output voltage <110V
+V_low_warn="110" # Warning if input/output voltage <110V
+V_low_crit="105" # Critical if input/output voltage <105V
 V_high_warn="125" # Warning if input/output voltage >125V
 V_high_crit="130" # Critical if input/output voltage >130V
 
