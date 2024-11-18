@@ -59,10 +59,10 @@ OID_RAIDName="raidName"										#OID="1.3.6.1.4.1.6574.3.1.1.2"
 OID_RAIDStatus="raidStatus"									#OID="1.3.6.1.4.1.6574.3.1.1.3"
 
 OID_Storage="hrStorageEntry"								#OID="1.3.6.1.2.1.25.2.3.1"
-OID_StorageDesc="hrStorageDescr.53"							#OID="1.3.6.1.2.1.25.2.3.1.3" [.53 to select /volume1]
-OID_StorageAllocationUnits="hrStorageAllocationUnits.53"	#OID="1.3.6.1.2.1.25.2.3.1.4" [.53 to select /volume1]
-OID_StorageSize="hrStorageSize.53"							#OID="1.3.6.1.2.1.25.2.3.1.5" [.53 to select /volume1]
-OID_StorageSizeUsed="hrStorageUsed.53"						#OID="1.3.6.1.2.1.25.2.3.1.6" [.53 to select /volume1]
+OID_StorageDesc="hrStorageDescr"							#OID="1.3.6.1.2.1.25.2.3.1.3" [.53 to select /volume1]
+OID_StorageAllocationUnits="hrStorageAllocationUnits"	#OID="1.3.6.1.2.1.25.2.3.1.4" [.53 to select /volume1]
+OID_StorageSize="hrStorageSize"							#OID="1.3.6.1.2.1.25.2.3.1.5" [.53 to select /volume1]
+OID_StorageSizeUsed="hrStorageUsed"						#OID="1.3.6.1.2.1.25.2.3.1.6" [.53 to select /volume1]
 
 OID_UpsModel="upsDeviceModel.0"								#OID="1.3.6.1.4.1.6574.4.1.1.0"
 OID_UpsSN="upsDeviceSerial.0"								#OID="1.3.6.1.4.1.6574.4.1.3.0"
@@ -653,18 +653,53 @@ else
 
 
 		usage)
-			# Check System Temperature
+			# Check System Usage
+
+			# check the correct path for volume 1, either 53 or 54
+			OID_StorageDesc53="hrStorageDescr.53"							#OID="1.3.6.1.2.1.25.2.3.1.3" [.53 to select /volume1]
+			OID_StorageDesc54="hrStorageDescr.54"							#OID="1.3.6.1.2.1.25.2.3.1.3" [.54 to select /volume1]
+
+			check=`$SNMPGET $SNMPArgs $hostname $OID_StorageDesc53 $OID_StorageDesc54 2> /dev/null`
+
+
+      StorageDesc53=$(echo "$check" | grep "$OID_StorageDesc53" | sed 's/.*STRING: \(.*\).*/\1/')
+      StorageDesc54=$(echo "$check" | grep "$OID_StorageDesc54" | sed 's/.*STRING: \(.*\).*/\1/')
+
+
+      if [ "$StorageDesc53" == "/volume1" ] ; then
+        index="53"
+        OID_StorageDesc="hrStorageDescr.$index"
+        OID_StorageAllocationUnits="hrStorageAllocationUnits.$index"
+        OID_StorageSize="hrStorageSize.$index"
+        OID_StorageSizeUsed="hrStorageUsed.$index"
+
+      elif [ "$StorageDesc54" == "/volume1" ] ; then
+        index="54"
+        OID_StorageDesc="hrStorageDescr.$index"
+        OID_StorageAllocationUnits="hrStorageAllocationUnits.$index"
+        OID_StorageSize="hrStorageSize.$index"
+        OID_StorageSizeUsed="hrStorageUsed.$index"
+      else
+        echo "No Volume found in index 53 and 54!"
+        exit 0
+      fi
+
 			syno=`$SNMPGET $SNMPArgs $hostname $OID_StorageSizeUsed $OID_StorageSize $OID_StorageDesc $OID_StorageAllocationUnits  2> /dev/null`
 			if [ "$?" != "0" ] ; then
 				output="CRITICAL - Problem with SNMP request, check user/password/host"
 				intReturn=$STATE_CRITICAL ;
+
+
+
+
 			else
 				StorageAllocationUnits=$(echo "$syno" | grep "$OID_StorageAllocationUnits" | sed 's/.*INTEGER: \(.*\).* Bytes/\1/')
 				StorageSizeUsed=$(echo "$syno" | grep "$OID_StorageSizeUsed" | sed 's/.*INTEGER: \(.*\).*/\1/')
 				StorageSize=$(echo "$syno" | grep "$OID_StorageSize" | sed 's/.*INTEGER: \(.*\).*/\1/')
 				StorageDesc=$(echo "$syno" | grep "$OID_StorageDesc" | sed 's/.*STRING: \(.*\).*/\1/')
 
-				#Calculate total size based on StorageSize register and AllocationUnits 
+
+				#Calculate total size based on StorageSize register and AllocationUnits
 				StorageSizeUsed_B=$(echo $((StorageSizeUsed * StorageAllocationUnits)))
 				StorageSize_B=$(echo $((StorageSize * StorageAllocationUnits)))
 				#Convert from bytes to TB
