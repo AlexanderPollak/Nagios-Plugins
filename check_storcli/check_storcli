@@ -416,45 +416,65 @@ else
 						for k in `seq 1 ${DGcount[$i]}`; do		
 							# KB in disk sector size
 							if [ ${DGdata[$i,(12 + $index)]} == "KB" ] ; then
-							  # any other disk manufacturer that has the name in the serial number section
-							  if [ ${DGdata[$i,(13 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(13 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(13 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(13 + $index)]} == "WDC" ] ; then
-							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							  index=$(($index+16))
-							  # Seagate disk manufacturer that only the serial number in the serial number section
+							  # Check for Samsung SSD which show up as "Samsung SSD 870 EVO 1TB"
+							  if [ ${DGdata[$i,(13 + $index)]} == "Samsung" ] && [ ${DGdata[$i,(14 + $index)]} == "SSD" ] ; then
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+19))
 							  else
-							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							  index=$(($index+15))
+							  	if [ ${DGdata[$i,(13 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(13 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(13 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(13 + $index)]} == "WDC" ] ; then
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+16))
+							    # Seagate disk manufacturer that only the serial number in the serial number section
+							    else
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+15))
+							    fi
+
 							  fi
+
 						  # no KB in disk sector size
 						  else
-						    # any other disk manufacturer that has the name in the serial number section
-						    if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
-							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							  index=$(($index+15))
-							  # Seagate disk manufacturer that only the serial number in the serial number section
+						    # Check for Samsung SSD which show up as "Samsung SSD 870 EVO 1TB"
+						    if [ ${DGdata[$i,(12 + $index)]} == "Samsung" ] && [ ${DGdata[$i,(13 + $index)]} == "SSD" ] ; then
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+18))
 							  else
-							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							  index=$(($index+14))
+						      # any other disk manufacturer that has the name in the serial number section
+						      if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+15))
+							    # Seagate disk manufacturer that only the serial number in the serial number section
+							    else
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+14))
+							    fi
 							  fi
 							fi
 						done
-					
 				
 						# Create Output
 						# Check all drive status
@@ -536,41 +556,62 @@ else
 						for k in `seq 1 ${DGcount[$i]}`; do
 							# KB in disk sector size
 							if [ ${DGdata[$i,(12 + $index)]} == "KB" ] ; then
-							  # any other disk manufacturer that has the name in the serial number section
-							  if [ ${DGdata[$i,(13 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(13 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(13 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(13 + $index)]} == "WDC" ] ; then
-							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							  index=$(($index+16))
-							  # Seagate disk manufacturer that only the serial number in the serial number section
+							  # Check for Samsung SSD which show up as "Samsung SSD 870 EVO 1TB"
+							  if [ ${DGdata[$i,(13 + $index)]} == "Samsung" ] && [ ${DGdata[$i,(14 + $index)]} == "SSD" ] ; then
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+19))
 							  else
-							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							  index=$(($index+15))
+							  	if [ ${DGdata[$i,(13 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(13 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(13 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(13 + $index)]} == "WDC" ] ; then
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+16))
+							    # Seagate disk manufacturer that only the serial number in the serial number section
+							    else
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+15))
+							    fi
+
 							  fi
+
 						  # no KB in disk sector size
 						  else
-						    # any other disk manufacturer that has the name in the serial number section
-						    if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
-							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							  index=$(($index+15))
-							  # Seagate disk manufacturer that only the serial number in the serial number section
+						    # Check for Samsung SSD which show up as "Samsung SSD 870 EVO 1TB"
+						    if [ ${DGdata[$i,(12 + $index)]} == "Samsung" ] && [ ${DGdata[$i,(13 + $index)]} == "SSD" ] ; then
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+18))
 							  else
-							  DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
-							  DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
-							  DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
-							  DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
-							  DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
-							  index=$(($index+14))
+						      # any other disk manufacturer that has the name in the serial number section
+						      if [ ${DGdata[$i,(12 + $index)]} == "TOSHIBA" ] || [ ${DGdata[$i,(12 + $index)]} == "INTEL" ] || [ ${DGdata[$i,(12 + $index)]} == "SAMSUNG" ] || [ ${DGdata[$i,(12 + $index)]} == "WDC" ] ; then
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+15))
+							    # Seagate disk manufacturer that only the serial number in the serial number section
+							    else
+							    DGType[$i,$k]=${DGdata[$i,(7 + $index)]}
+							    DGState[$i,$k]=${DGdata[$i,(3 + $index)]}
+							    DGSize[$i,$k]=${DGdata[$i,(5 + $index)]}
+							    DGUnit[$i,$k]=${DGdata[$i,(6 + $index)]}
+							    DGLocation[$i,$k]=${DGdata[$i,(1 + $index)]}
+							    index=$(($index+14))
+							    fi
 							  fi
 							fi
 						done
