@@ -64,6 +64,9 @@ temp_crit="60" # Critical if T>60C
 load_warn="75" # Warning if load >75%
 load_crit="85" # Critical if load >85%
 
+time_warn="10"  # Warning if battery runtime is below this time in minutes
+time_crit="5"   # Critical if battery runtime is below this time in minutes
+
 V_low_warn="110" # Warning if input/output voltage <110V
 V_low_crit="105" # Critical if input/output voltage <105V
 V_high_warn="125" # Warning if input/output voltage >125V
@@ -91,10 +94,11 @@ usage(){
     echo "	    info              System infos"
     echo "	    status            Check UPS status: [Status]"
     echo "	    battery           Check the Battery: [Status, Charge, Voltage]"
-    echo "      temperature       Check UPS temperature [Temperature]"
+    echo "	    temperature       Check UPS temperature [Temperature]"
     echo "	    input             Check input: [Voltage, Current]"
     echo "	    output            Check output: [Voltage, Current]"
     echo "	    load              Check UPS load: [Phase Load in %, Total Power]"
+    echo "	    time_remaining    Check battery time remaining with current load [minutes]"
     echo ""
     echo "	-A  [Bat. warning]    Threshold for Battery Charge Warning [Default: 70%]"
     echo "	-B  [Bat. critical]   Threshold for Battery Charge Critical [Default: 40% ]"
@@ -102,10 +106,12 @@ usage(){
     echo "	-D  [T. critical]     Threshold for Temperature Critical [Default: 60C]"
     echo "	-E  [Load warning]    Threshold for UPS High Load Warning [Default: 75%]"
     echo "	-F  [Load critical]   Threshold for UPS High Load Critical [Default: 85%]"
-    echo "  -G  [V. low warn]     Threshold for low input/output Voltage Warning [Default: 115V]"
-    echo "  -H  [V. low crit]     Threshold for low input/output Voltage Critical [Default: 110V]"
-    echo "  -I  [V. high warn]    Threshold for high input/output Voltage Warning [Default: 125V]"
-    echo "  -J  [V. high crit]    Threshold for high input/output Voltage Critical [Default: 130V]"
+    echo "	-G  [V. low warn]     Threshold for low input/output Voltage Warning [Default: 110V]"
+    echo "	-H  [V. low crit]     Threshold for low input/output Voltage Critical [Default: 105V]"
+    echo "	-I  [V. high warn]    Threshold for high input/output Voltage Warning [Default: 125V]"
+    echo "	-J  [V. high crit]    Threshold for high input/output Voltage Critical [Default: 130V]"
+    echo "	-K  [time warn]       Threshold for battery warning remaining time [Default: 10 min]"
+    echo "	-L  [time crit]       Threshold for battery critical remaining time [Default: 5 min]"
     echo ""
     echo "examples:	./check_apc_ups -h 1.2.3.4 -c public -s info"
     echo "		./check_apc_ups -h 1.2.3.4 -p 4321 -c public -s battery_status "
@@ -134,6 +140,8 @@ while getopts c:h:p:s:t:A:B:C:D:E:F:G:H:I:J OPTNAME; do
     H)  V_low_crit="$OPTARG";;
     I)  V_high_warn="$OPTARG";;
     J)  V_high_crit="$OPTARG";;
+    K)  time_warn="$OPTARG";;
+    L)  time_crit="$OPTARG";;
     esac
 done
 
@@ -196,50 +204,50 @@ else
 
 
         status)
-# UPS check status
-			status=`snmpget $SNMPArgs $MIB_UPSSTATUS`
-			if [ "$?" != "0" ] ; then
-				output="CRITICAL - Problem with SNMP request, check user/password/host"
-				intReturn=$STATE_CRITICAL ;
-			else
+          # UPS check status
+			    status=`snmpget $SNMPArgs $MIB_UPSSTATUS`
+			    if [ "$?" != "0" ] ; then
+				    output="CRITICAL - Problem with SNMP request, check user/password/host"
+				    intReturn=$STATE_CRITICAL ;
+			    else
 
-				UPSSTATUS=$(echo "$status" | grep "$MIB_UPSSTATUS" | sed 's/.*(\(.*\)).*/\1/' )
+				    UPSSTATUS=$(echo "$status" | grep "$MIB_UPSSTATUS" | sed 's/.*(\(.*\)).*/\1/' )
 
-				if [ "$UPSSTATUS" != "" ] ; then
+			    	if [ "$UPSSTATUS" != "" ] ; then
 
-					if [ "$UPSSTATUS" == "1" ] ; then
-						output="WARNING - UPS Status: Other"
-						intReturn=$STATE_WARNING ;
-					fi
-					if [ "$UPSSTATUS" == "2" ] ; then
-						output="WARNING - UPS Status: None"
-						intReturn=$STATE_WARNING ;
-					fi
-					if [ "$UPSSTATUS" == "3" ] ; then
-						output="OK - UPS Status: Normal"
-						intReturn=$STATE_OK ;
-					fi
-					if [ "$UPSSTATUSS" == "4" ] ; then
-						output="WARNING - UPS Status: Bypass"
-						intReturn=$STATE_WARNING ;
-					fi
-					if [ "$UPSSTATUSS" == "5" ] ; then
-						output="CRITICAL - UPS Status: Battery"
-						intReturn=$STATE_CRITICAL ;
-					fi
-					if [ "$UPSSTATUSS" == "6" ] ; then
-						output="WARNING - UPS Status: Booster"
-						intReturn=$STATE_WARNING ;
-					fi
-					if [ "$UPSSTATUSS" == "7" ] ; then
-						output="WARNING - UPS Status: Reducer"
-						intReturn=$STATE_WARNING ;
-					fi
-				else
-					output="WARNING - No UPS Status Information Returned"
-					intReturn=$STATE_WARNING
-				fi
-			fi
+					    if [ "$UPSSTATUS" == "1" ] ; then
+						    output="WARNING - UPS Status: Other"
+						    intReturn=$STATE_WARNING ;
+					    fi
+					    if [ "$UPSSTATUS" == "2" ] ; then
+						    output="WARNING - UPS Status: None"
+						    intReturn=$STATE_WARNING ;
+					    fi
+					    if [ "$UPSSTATUS" == "3" ] ; then
+						    output="OK - UPS Status: Normal"
+						    intReturn=$STATE_OK ;
+					    fi
+					    if [ "$UPSSTATUSS" == "4" ] ; then
+						    output="WARNING - UPS Status: Bypass"
+						    intReturn=$STATE_WARNING ;
+					    fi
+					    if [ "$UPSSTATUSS" == "5" ] ; then
+					    	output="CRITICAL - UPS Status: Battery"
+					    	intReturn=$STATE_CRITICAL ;
+					    fi
+					    if [ "$UPSSTATUSS" == "6" ] ; then
+					    	output="WARNING - UPS Status: Booster"
+					    	intReturn=$STATE_WARNING ;
+					    fi
+					    if [ "$UPSSTATUSS" == "7" ] ; then
+					    	output="WARNING - UPS Status: Reducer"
+					    	intReturn=$STATE_WARNING ;
+					    fi
+				    else
+				    	output="WARNING - No UPS Status Information Returned"
+				    	intReturn=$STATE_WARNING
+				    fi
+			    fi
         ;;
 
 
@@ -497,6 +505,39 @@ else
                 else
                     output="WARNING - No UPS Load Information Returned"
                     intReturn=$STATE_WARNING
+                fi
+            fi
+        ;;
+
+        time_remaining)
+        # Display UPS time remaining on battery
+        input=`snmpget $SNMPArgs $MIB_MINUTESREMAINING`
+        if [ "$?" != "0" ] ; then
+                                output="CRITICAL - Problem with SNMP request, check user/password/host"
+                                intReturn=$STATE_CRITICAL ;
+                        else
+                MINUTESREMAINING=$(echo "$input" | grep "$MIB_MINUTESREMAINING" | sed 's/.*INTEGER: \(.*\)\sminute.*/\1/' )
+                if [ $MINUTESREMAINING != "" ]; then
+                    if [ $MINUTESREMAINING -ge $time_warn ]&&[ $MINUTESREMAINING -ge $time_crit ]; then
+                        output="OK - Time remaining on battery: $MINUTESREMAINING minutes"
+                        intReturn=$STATE_OK ;
+
+                    elif [ $MINUTESREMAINING -lt $time_warn ]&&[ $MINUTESREMAINING -ge $time_crit ]; then
+                        output="WARNING - Time remaining on battery: $MINUTESREMAINING minutes"
+                        intReturn=$STATE_WARNING ;
+
+                    elif [ $MINUTESREMAINING -lt $time_warn ]&&[ $MINUTESREMAINING -lt $time_crit ]; then
+                    output="CRITICAL - Time remaining on battery: $MINUTESREMAINING minutes"
+                    intReturn=$STATE_CRITICAL ;
+
+                    else
+                        output="WARNING - Unexpected battery remaining time received: $MINUTESREMAINING"
+                        intReturn=$STATE_WARNING ;
+                    fi
+
+                else
+                    output="WARNING - No UPS Load Information Returned"
+                    intReturn=$STATE_WARNING ;
                 fi
             fi
         ;;

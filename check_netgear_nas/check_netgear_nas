@@ -32,28 +32,28 @@ SNMPPort="161"
 
 #OID declarations
 OID_ng="netgear"
-OID_software="nasMgrSoftwareVersion.0"
-OID_serialNumber="nasMgrSerialNUM.0"
+OID_software="READYNASOS-MIB::nasMgrSoftwareVersion.0"
+OID_serialNumber="READYNASOS-MIB::nasMgrSerialNUM.0"
 
-OID_systemFanStatus="fanStatus.1"
-OID_CPUTemp="temperatureValue.1"
+OID_systemFanStatus="READYNASOS-MIB::fanStatus.1"
+OID_CPUTemp="READYNASOS-MIB::temperatureValue.1"
 
 
-OID_diskID="diskID"	
-OID_diskModel="diskModel"
-OID_diskStatus="diskState"
-OID_diskTemp="diskTemperature"
-OID_diskError='ataError'
+OID_diskID="READYNASOS-MIB::diskID"
+OID_diskModel="READYNASOS-MIB::diskModel"
+OID_diskStatus="READYNASOS-MIB::diskState"
+OID_diskTemp="READYNASOS-MIB::diskTemperature"
+OID_diskError='READYNASOS-MIB::ataError'
 
 OID_RAID=""
-OID_RAIDName="volumeName"
-OID_RAIDStatus="volumeStatus"
-OID_RAIDLevel="volumeRAIDLevel"
+OID_RAIDName="READYNASOS-MIB::volumeName"
+OID_RAIDStatus="READYNASOS-MIB::volumeStatus"
+OID_RAIDLevel="READYNASOS-MIB::volumeRAIDLevel"
 
 
-OID_StorageSize="volumeSize.1"
-OID_StorageSizeFree="volumeFreeSpace.1"
-OID_StorageDesc="volumeName.1"
+OID_StorageSize="READYNASOS-MIB::volumeSize.1"
+OID_StorageSizeFree="READYNASOS-MIB::volumeFreeSpace.1"
+OID_StorageDesc="READYNASOS-MIB::volumeName.1"
 
 
 
@@ -309,8 +309,7 @@ else
 					diskID[$i]=$(echo "$syno" | grep "$OID_diskID.$i" | sed 's/.*"\(.*\)".*/\1/')
 					diskModel[$i]=$(echo "$syno" | grep "$OID_diskModel.$i" | sed 's/.*"\(.*\)".*/\1/')
 					diskStatus[$i]=$(echo "$syno" | grep "$OID_diskStatus.$i" | sed 's/.*"\(.*\)".*/\1/')
-					diskError[$i]=$(echo "$syno" | grep "$OID_diskError.$i" | sed 's/.*INTEGER: \(.*\).*/\1/')					
-
+					diskError[$i]=$(echo "$syno" | grep "$OID_diskError.$i" | sed 's/.*INTEGER: \(.*\).*/\1/')
 
 					case ${diskStatus[$i]} in
 						ONLINE)		diskStatus[$i]="Online";			forReturn=$STATE_OK;;#		output=$output"DISK status (${diskID[$i]}): ${diskStatus[$i]}  SMART Error Count:${diskError[$i]}\n";;
