@@ -1,27 +1,26 @@
-# Pump-Monitor
-This program monitors a groundwater pump system. It reads the PLC values via a Moxa E1242 Ethernet IO Server and pushes the data into a MySQL database. The data is then visualized using Grafana.
+# Check Temperature Server Shutdown
+This program monitors the temperature of the Signal Processing Room at the Hat Creek Radio Observatory and shuts down servers in case of a cooling failure.
 
 
 # Supported Devices
 ```
-Moxa Devices:
-        1. E1242 Ethernet IO Server
+RoomAlert Devices:
+        1. 32S
 ```
 
 # Communication
 ```
-Moxa Devices:
-	The IO Server is connected via ethernet and the communication uses the SNMPv1 protocol
+RoomAlert Devices:
+	The RoomAlert 32S environment monitor is connected via ethernet. It uses the SNMPv1 protocol
 	to read out the relevant register. This program supports the readout of individual regsiters
-	representing digital and analog inputs. The ability to control digital outputs will be added
-	at a later stage. 
+	representing digital and analog inputs.
 ```
 
 
 # CLASS Implementation
 
 
-## moxa_com: E1242
+## roomalert_com: 32S
 ```
 This module contains classes and functions to establish the communication with the Moxa E1242 Module via SNMPv1.
 

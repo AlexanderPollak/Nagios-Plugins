@@ -2,7 +2,7 @@
 # and read the charge status, voltage, current, and temperature
 # it stores the data in a .csv file with the actual date
 
-from moxa_com import *
+from roomalert_com import *
 from mysql_write import *
 import time
 

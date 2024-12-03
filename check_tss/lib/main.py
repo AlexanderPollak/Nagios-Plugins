@@ -2,7 +2,7 @@
 
 import configparser
 from control import control
-from moxa_com import *
+from roomalert_com import *
 from mysql_write import *
 
 
