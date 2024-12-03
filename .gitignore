@@ -17,4 +17,13 @@
 /check_synology/.DS_Store
 /check_apc_pdu/.idea/
 /check_apc_pdu/.DS_Store
-
+.idea/Nagios-Plugins.iml
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/misc.xml
+.idea/modules.xml
+.idea/vcs.xml
+/check_apc_ups/.idea/check_apc_ups.iml
+/check_apc_ups/.idea/inspectionProfiles/profiles_settings.xml
+/check_apc_ups/.idea/misc.xml
+/check_apc_ups/.idea/modules.xml
+/check_apc_ups/.idea/vcs.xml
