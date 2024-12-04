@@ -1,4 +1,4 @@
-# Check Temperature Server Shutdown
+# Check Thermal Server Shutdown
 This program monitors the temperature of the Signal Processing Room at the Hat Creek Radio Observatory and shuts down servers in case of a cooling failure.
 
 

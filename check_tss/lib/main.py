@@ -2,51 +2,56 @@
 
 import configparser
 from control import control
-from roomalert_com import *
-from mysql_write import *
+from avtech_com import *
+
 
 
 def main():
     
-    # Import Pump Monitor gonfiguration values from pm.cfg file in etc directory
+    # Import Thermal Server Shutdown configuration values from tss.cfg file in etc directory
     config = configparser.ConfigParser()
-    config.read('/usr/local/pump-monitor/etc/pm.cfg') # Location of config file
+    config.read('../etc/tss.cfg') # Location of config file
 
     # Parse values into the main function.
 
-    # Communication settings to connect to the Moxa E1242 module.
-    SNMP_Host = config.get('COMMUNICATION SETTINGS','SNMP_Host')  # IP Address of the Moxa Module
+    # Communication settings to connect to the Avtech RoomAlert 32S module.
+    SNMP_Host = config.get('COMMUNICATION SETTINGS','SNMP_Host')  # IP Address of the RoomAlert Module
     SNMP_Version = config.get('COMMUNICATION SETTINGS','SNMP_Version')  # SNMP Version
     SNMP_Community = config.get('COMMUNICATION SETTINGS','SNMP_Community') # SNMP Community String
     SNMP_Port = config.get('COMMUNICATION SETTINGS','SNMP_Port') # SNMP Port
     SNMP_Device = config.get('COMMUNICATION SETTINGS', 'SNMP_Device')  # SNMP Device
 
-    # General settings for pump monitor program
-    Cadance = config.getint('GENERAL MONITOR SETTINGS','Cadance')  # Monitor refresh rate in seconds
-    Display = config.getboolean('GENERAL MONITOR SETTINGS','Display') # Enable Terminal Print
-    SQL_Log = config.getboolean('GENERAL MONITOR SETTINGS','SQL_Log') # Enable BMS logging into SQL
+    # General settings to monitor specific temperature sensors connected to the RoomAlert Module.
+    # 3 temperature sensors are required for this program and are defined by the MIB identifier.
+    T_Sensor_C_1 = config.get('GENERAL MONITOR SETTINGS','T_Sensor_C_1')    # Temperature Sensor 1
+    T_Sensor_C_2 = config.get('GENERAL MONITOR SETTINGS','T_Sensor_C_2')    # Temperature Sensor 2
+    T_Sensor_C_3 = config.get('GENERAL MONITOR SETTINGS','T_Sensor_C_3')    # Temperature Sensor 3
 
-    # Specific variables for the SQL database writer
 
-    SQL_Host = config.get('MySQL SPECIFIC SETTINGS','SQL_Host')  # MySQL server address
-    SQL_Auth = config.get('MySQL SPECIFIC SETTINGS','SQL_Auth')  # MySQL authentication method
-    SQL_User = config.get('MySQL SPECIFIC SETTINGS','SQL_User')  # MySQl username
-    SQL_Password = config.get('MySQL SPECIFIC SETTINGS','SQL_Password')  # MySQl user password
-    SQL_Database = config.get('MySQL SPECIFIC SETTINGS','SQL_Database')  # MySQL database
+
+
+
+    # Specific conditions to trigger a thermal server shutdown
+    N_Sensors = config.getint('GENERAL CONTROL SETTINGS','N_Sensors')  # Number of sensors to trigger a shutdown
+    Shutdown_Temperature = config.getint('GENERAL CONTROL SETTINGS', 'Shutdown_Temperature')  # Temperature threshold to trigger a shutdown
+    Shutdown_Message = config.get('GENERAL CONTROL SETTINGS', 'Shutdown_Message')  # Shutdown message
+
+    # Specific list of hosts that will be shutdown during an overheat event.
+    Host_Names_Level_1 = config.get('HOST LIST', 'Host_Names_Level_1').split(", ")  # List of Hosts
 
 
     ################################################################################################################
 
 
-    print('\nCurrent Configuration of Pump Monitor Program \n')
-    print('Monitor Cadance: ' + str(Cadance))
-    print('Control- Display:' +str(Display))
-    print('Control- SQL Data Log:' + str(SQL_Log))
-    print('\n')
+    print('\nCurrent Configuration of Thermal Server Shutdown \n')
+   # print('Monitor Cadance: ' + str(Cadance))
+   # print('Control- Display:' +str(Display))
+   # print('Control- SQL Data Log:' + str(SQL_Log))
+   # print('\n')
 
     control(SNMP_Host=SNMP_Host, SNMP_Version=SNMP_Version, SNMP_Community=SNMP_Community, SNMP_Port=SNMP_Port, SNMP_Device=SNMP_Device, \
-            Cadance=Cadance, Display=Display,SQL_Log=SQL_Log, \
-            SQL_Host=SQL_Host, SQL_Auth=SQL_Auth, SQL_User=SQL_User,SQL_Password=SQL_Password,SQL_Database=SQL_Database)
+            T_Sensor_C_1=T_Sensor_C_1, T_Sensor_C_2=T_Sensor_C_2, T_Sensor_C_3=T_Sensor_C_3, \
+            N_Sensors=N_Sensors, Shutdown_Temperature=Shutdown_Temperature, Shutdown_Message=Shutdown_Message, Host_Names_Level_1=Host_Names_Level_1)
 
 
 if __name__ == '__main__':

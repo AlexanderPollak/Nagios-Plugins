@@ -1,17 +1,17 @@
 """ This module contains classes and functions to establish communication with the
- Moxa E1200 Remote I/O Server via SNMP.
+ Avtech RoomAlert 32S Environmental Monitor via SNMP.
 
 **Description:**
 
-    The communication is established over SNMP protocol using the Moxa E1242 v1.2 MIB.
+    The communication is established over SNMP protocol using the Avtech ROOMALERT32S MIB.
     The device is accessed via ethernet by the control computer.
     The functions in this module will allow to read device information and input values via SNMP,
-    thereby allowing it to monitor analog and digital input values of the Remote I/O Server.
+    thereby allowing it to monitor digital input values of the RoomAlert unit.
     This package includes functions to communicate with following
     devices:
-        1. Moxa E1242 Remote I/O Server
-    The main class in this module ("moxa_com") allows the user to
-    read input values of the E1242 device.
+        1. Avtech RoomAlert 32S
+    The main class in this module ("RA32S") allows the user to
+    read input values of the RoomAlert 32S device.
 
     Notes:
 
@@ -20,7 +20,7 @@
     sudo apt-get install snmp
     # downloads common SNMP MIBs:
     sudo apt-get install snmp-mibs-downloader
-    Note that "moxa-e1242-v1.2.mib" needs to be copied into "/usr/share/snmp/mibs/"
+    Note that "ROOMALERT32S.MIB" needs to be copied into "/usr/share/snmp/mibs/"
     Note that /etc/snmp/snmp.conf needs to be modified:
     nano /etc/snmp/snmp.conf
     change in the fourth line "#mibs" to "mibs ALL"
@@ -39,7 +39,7 @@ from time import time
 
 
 
-class E1242(object):
+class RA32S(object):
     """This class implements the SNMP connection functions """
     def __init__(self):
         ''' Constructor for this class. '''
@@ -56,8 +56,8 @@ class E1242(object):
 
 
 
-    def open (self,SNMP_VERSION = 2,SNMP_COMMUNITY = 'read',SNMP_HOST = '192.168.0.216',SNMP_PORT = 161, SNMP_DEVICE = 'E1242'):
-        """Stores prameter to connect to Moxa E1242 via SNMPv1
+    def open (self,SNMP_VERSION = 2,SNMP_COMMUNITY = 'public',SNMP_HOST = '10.2.3.15',SNMP_PORT = 161, SNMP_DEVICE = 'AVTECH RoomAlert 32S'):
+        """Stores prameter to connect to RoomAlert 32S via SNMPv1
 
         Args:
             SNMP_VERSION: SNMP Version. Default='2'
@@ -78,9 +78,9 @@ class E1242(object):
 
 
     def is_connected(self):
-        """This function checks if the connection to the Moxa E1242 Module is established
+        """This function checks if the connection to the Avtech RoomAlert 32S unit is established
         and if it responds to a readout command. It requests the system description
-        and checks for the correct device (E1242).
+        and checks for the correct device (AVTECH RoomAlert 32S).
 
         Returns: Boolean value True or False
 
