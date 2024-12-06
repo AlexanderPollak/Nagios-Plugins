@@ -5,4 +5,4 @@ ipython==8.14.0
 mysql-connector==2.2.9
 numpy==1.25.2
 pyparsing==2.4.7
-pysnmp=4.4.12
+pysnmp==4.4.12

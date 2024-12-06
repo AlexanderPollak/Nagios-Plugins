@@ -10,7 +10,7 @@ def main():
     
     # Import Thermal Server Shutdown configuration values from tss.cfg file in etc directory
     config = configparser.ConfigParser()
-    config.read('../etc/tss.cfg') # Location of config file
+    config.read('/usr/local/nagios/libexec/check_tss/etc/tss.cfg') # Location of config file
 
     # Parse values into the main function.
 

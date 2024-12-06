@@ -3,10 +3,10 @@ from pysnmp.hlapi import *
 
 iterator = getCmd(
     SnmpEngine(),
-    CommunityData('read', mpModel=0),
-    UdpTransportTarget(('192.168.0.216', 161)),
+    CommunityData('public', mpModel=0),
+    UdpTransportTarget(('10.2.3.15', 161)),
     ContextData(),
-    ObjectType(ObjectIdentity('SNMPv2-MIB', 'sysName', 0))
+    ObjectType(ObjectIdentity('ROOMALERT32S-MIB', 'digital-sen2-1', 0))
 )
 
 errorIndication, errorStatus, errorIndex, varBinds = next(iterator)

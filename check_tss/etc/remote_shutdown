@@ -1,0 +1,91 @@
+#!/bin/bash
+
+##
+#
+# when executed this script shuts down the host with a specified message
+#
+# Requires to be executed as sudo
+# visudo
+# Added for Nagios emergency shutdown
+# "nagios ALL=NOPASSWD: /usr/sbin/shutdown"
+#
+# Usage:
+#	./remote_shutdown -s -m "MESSAGE"
+#
+#
+# Tested with Ubuntu 20.04
+#---------------------------------------------------
+#
+# 2024-12-05:  Version 1.0	\\ Alexander Pollak
+#
+##
+
+ 
+
+SU="sudo"
+
+
+
+# Default Values for Warning and Critical Checks:
+
+DEFAULT_message="Automatic Emergency Shutdown in 60 Seconds, Triggered by SPR Temperature"
+
+# nagios return values
+export STATE_OK=0
+export STATE_WARNING=1
+export STATE_CRITICAL=2
+export STATE_UNKNOWN=3
+export STATE_DEPENDENT=4
+
+intReturn=$STATE_OK
+
+usage()
+{
+        echo "usage: ./remote_shutdown -s [shutdown] -m [\"message\"]"
+        echo ""
+        echo "	-m  [message]         Specifies the message displayed in the terminal when triggered,"
+        echo "                              note that the message needs to be in \"\""
+        echo "                              default: \"$DEFAULT_message\""
+        echo "	-s  [shutdown]        Executes the shutdown command"
+        echo ""
+        echo "	-h  [help]            Shows the help menu"
+        echo ""
+        echo "Note the script needs to be executed as sudo in order for the shutdown to have the correct permissions."
+        echo ""
+        echo "examples:	./remote_shutdown -s"
+        echo "	     	./remote_shutdown -s -m \"triggered by admin\""
+        exit 3
+}
+
+
+
+if [ "$1" == "--help" ]; then
+    usage
+fi
+
+while getopts m:sh OPTNAME; do
+	case "$OPTNAME" in
+	s)	shutdown="TRUE";;
+	m)	USER_message="$OPTARG";;
+	h)  usage;;
+	*)	usage;;
+        esac
+done
+
+
+message=$DEFAULT_message
+
+if [ "$USER_message" != "" ] ; then
+  message=$USER_message
+fi
+
+if [ "$shutdown" = "TRUE" ] ; then
+	echo "$message" |wall
+	`$SU shutdown -P --no-wall 2> /dev/null`
+	echo -e "Shutdown Command Ack"
+	exit 0
+else
+	echo -e "Shutdown Command NOT Executed"
+	exit 3
+fi
+

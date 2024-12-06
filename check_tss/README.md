@@ -20,15 +20,14 @@ RoomAlert Devices:
 # CLASS Implementation
 
 
-## roomalert_com: 32S
+## avtech_com: RA32S
 ```
-This module contains classes and functions to establish the communication with the Moxa E1242 Module via SNMPv1.
+This module contains classes and functions to establish the communication with the Avtech RoomAlert 32S unit via SNMPv1.
 
-The class in this module ("E1242") allows the user to communicate with the module and extract the following registers:
+The class in this module ("RA32S") allows the user to communicate with the unit and extract the following registers:
 
 List of extracted values:
-    1. Analog Input Voltage 
-    2. Digital Input Status
+    1. Temperature in deg Celcius for any connected sensor. 
 
 
 List of functions:
@@ -36,7 +35,7 @@ List of functions:
 	close()
 	is_connected()
 	read_analog()
-	read_digital()
+    read_di_temp_c()
 
 ```
 
