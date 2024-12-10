@@ -2,15 +2,35 @@
 
 import configparser
 from control import control
-from avtech_com import *
+import sys
 
-
+def parse_repeated_keys(file_path, section_name, key_name):
+    results = []
+    with open(file_path, "r") as file:
+        in_section = False
+        for line in file:
+            line = line.strip()
+            if line.startswith(f"[{section_name}]"):
+                in_section = True
+                continue
+            if in_section:
+                if line.startswith("[") and line.endswith("]"):
+                    break  # End of section
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    if key.strip() == key_name:
+                        results.append(value.strip())
+    return results
 
 def main():
-    
+
+
+
+
     # Import Thermal Server Shutdown configuration values from tss.cfg file in etc directory
-    config = configparser.ConfigParser()
-    config.read('/usr/local/nagios/libexec/check_tss/etc/tss.cfg') # Location of config file
+    config = configparser.ConfigParser(strict=False)
+    file_path = '/usr/local/nagios/libexec/check_tss/etc/tss.cfg' # Location of config file
+    config.read(file_path) # Load file path
 
     # Parse values into the main function.
 
@@ -34,28 +54,24 @@ def main():
     # Specific conditions to trigger a thermal server shutdown
     N_Sensors = config.getint('GENERAL CONTROL SETTINGS','N_Sensors')  # Number of sensors to trigger a shutdown
     Shutdown_Temperature = config.getint('GENERAL CONTROL SETTINGS', 'Shutdown_Temperature')  # Temperature threshold to trigger a shutdown
-    Shutdown_Message = config.get('GENERAL CONTROL SETTINGS', 'Shutdown_Message')  # Shutdown message
+
 
     # Specific list of hosts that will be shutdown during an overheat event.
-    Host_Names_Level_1 = config.get('HOST LIST', 'Host_Names_Level_1').split(", ")  # List of Hosts
-
+    Host_Names_Level_1 = parse_repeated_keys(file_path,'HOST LIST','Host_Names_Level_1')  # List of Hosts
 
     ################################################################################################################
+    #print(Host_Names_Level_1)
 
-
-    print('\nCurrent Configuration of Thermal Server Shutdown \n')
-   # print('Monitor Cadance: ' + str(Cadance))
-   # print('Control- Display:' +str(Display))
-   # print('Control- SQL Data Log:' + str(SQL_Log))
-   # print('\n')
-
-    control(SNMP_Host=SNMP_Host, SNMP_Version=SNMP_Version, SNMP_Community=SNMP_Community, SNMP_Port=SNMP_Port, SNMP_Device=SNMP_Device, \
+    tmp_return=control(SNMP_Host=SNMP_Host, SNMP_Version=SNMP_Version, SNMP_Community=SNMP_Community, SNMP_Port=SNMP_Port, SNMP_Device=SNMP_Device, \
             T_Sensor_C_1=T_Sensor_C_1, T_Sensor_C_2=T_Sensor_C_2, T_Sensor_C_3=T_Sensor_C_3, \
-            N_Sensors=N_Sensors, Shutdown_Temperature=Shutdown_Temperature, Shutdown_Message=Shutdown_Message, Host_Names_Level_1=Host_Names_Level_1)
+            N_Sensors=N_Sensors, Shutdown_Temperature=Shutdown_Temperature, Host_Names_Level_1=Host_Names_Level_1)
 
+    # returns the nagios information if Ok or NOK
+    return tmp_return
 
 if __name__ == '__main__':
 
-    main()
 
+    tmp_return = main()
+    sys.exit(tmp_return)
 

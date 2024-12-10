@@ -47,6 +47,7 @@ usage()
         echo "                              note that the message needs to be in \"\""
         echo "                              default: \"$DEFAULT_message\""
         echo "	-s  [shutdown]        Executes the shutdown command"
+        echo "	-t  [test]            Tests the shutdown command by sending a broadcast message"
         echo ""
         echo "	-h  [help]            Shows the help menu"
         echo ""
@@ -63,9 +64,10 @@ if [ "$1" == "--help" ]; then
     usage
 fi
 
-while getopts m:sh OPTNAME; do
+while getopts m:sth OPTNAME; do
 	case "$OPTNAME" in
 	s)	shutdown="TRUE";;
+	t)	test="TRUE";;
 	m)	USER_message="$OPTARG";;
 	h)  usage;;
 	*)	usage;;
@@ -79,7 +81,11 @@ if [ "$USER_message" != "" ] ; then
   message=$USER_message
 fi
 
-if [ "$shutdown" = "TRUE" ] ; then
+if [ "$test" = "TRUE" ] ; then
+	echo "Test Message for Emergency Shutdown. Please Ignore!" |wall
+	echo -e "Test Message Ack"
+	exit 0
+elif [ "$shutdown" = "TRUE" ] ; then
 	echo "$message" |wall
 	`$SU shutdown -P --no-wall 2> /dev/null`
 	echo -e "Shutdown Command Ack"

@@ -4,7 +4,7 @@
 
 from avtech_com import *
 import subprocess
-import time
+import numpy as np
 
 
 def execute_nrpe(NRPE_HOST, NRPE_COMMAND, NRPE_PATH='/usr/local/nagios/libexec', NRPE_PORT=5660):
@@ -34,7 +34,7 @@ def execute_nrpe(NRPE_HOST, NRPE_COMMAND, NRPE_PATH='/usr/local/nagios/libexec',
     # Execute the shell script
     try:
         result = subprocess.run([program_path,
-                                 "-H", str(NRPE_HOST), "-p", str(NRPE_PORT), "-c", str(NRPE_COMMAND)],
+                                 "-H", str(NRPE_HOST), "-p", str(NRPE_PORT), "-c", str(NRPE_COMMAND), "-t", "2"],
                                 capture_output=True,  # Capture stdout and stderr
                                 text=True  # Decode output to strings
                                 )
@@ -44,8 +44,8 @@ def execute_nrpe(NRPE_HOST, NRPE_COMMAND, NRPE_PATH='/usr/local/nagios/libexec',
         return_string = str(result.stdout)
 
         # Print the script's output
-        # print("Script Output:")
-        # print(result.stdout)
+        #print("Script Output:")
+        #print(result.stdout)
 
         return [return_string, return_code]
 
@@ -54,7 +54,9 @@ def execute_nrpe(NRPE_HOST, NRPE_COMMAND, NRPE_PATH='/usr/local/nagios/libexec',
 
 
 def check_shutdown_condition(AVTECH, T_Sensor_C_1, T_Sensor_C_2, T_Sensor_C_3, N_Sensors, Shutdown_Temperature):
-    """function to check if the temperature meets the shutdown condition
+    """function to check if the temperature meets the shutdown condition. In case of a sensor failure it reduces
+        the number of required sensors to the number of available sensors in case the specified sensor number
+        exceeds the available sensors.
 
     Args:
         AVTECH:                 Object of the AVTECH roomalert unit.
@@ -65,20 +67,20 @@ def check_shutdown_condition(AVTECH, T_Sensor_C_1, T_Sensor_C_2, T_Sensor_C_3, N
         Shutdown_Temperature:   Threshold for the shutdown temperature.
 
 
-    Returns: Boolean value True or False
+    Returns: Boolean value True or False or None
 
     """
 
     try:
 
         # lists to track the sensor status
-        sensor_val = []
-        sensor_ok = []
-        sensor_trig = []
+        sensor_val = [np.float64(999.0)] * 3
+        sensor_ok = [None] * 3
+        sensor_trig = [None] * 3
 
         if N_Sensors < 1 or N_Sensors > 3:
             print("Number of sensors specified in N_Sensors is outside the allowed range of 1-3")
-            return
+            return None
 
         # Check that all sensors are connected and return a value
         tmp1 = AVTECH.read_di_temp_c(T_Sensor_C_1)
@@ -86,158 +88,103 @@ def check_shutdown_condition(AVTECH, T_Sensor_C_1, T_Sensor_C_2, T_Sensor_C_3, N
         tmp3 = AVTECH.read_di_temp_c(T_Sensor_C_3)
         sensor_val = [tmp1, tmp2, tmp3]
         # sensor list if the sensor is OK
-        for sensor in sensor_val:
+        for sensor in range(len(sensor_val)):
             if sensor_val[sensor] == 999.0:
                 sensor_ok[sensor] = False
             else:
                 sensor_ok[sensor] = True
 
         # Checks each working sensor if it is above the threshold
-        for sensor in sensor_ok:
-            if sensor == True and sensor_val > Shutdown_Temperature:
+        for sensor in range(len(sensor_ok)):
+            if sensor_ok[sensor] == True and sensor_val[sensor] > np.float64(Shutdown_Temperature):
                 sensor_trig[sensor] = True
             else:
                 sensor_trig[sensor] = False
 
+        # Get number of not working sensors and subtracting it from list of sensors to be checked
+        # the lowest number is 1, hence if all sensors fail it still requires 1
+        # basically checks if number of sensors required to pass is available if not it reduces the number
+        # and adjusts it to the number of available sensors.
+        if sensor_ok.count(False) > 0 and N_Sensors > sensor_ok.count(True):
+            N_Sensors = max(N_Sensors - sensor_ok.count(False), 1)
+
         # checks if the specified number of sensors is triggered
-        if sensor_trig.count(True) == N_Sensors:
+        if sensor_trig.count(True) >= N_Sensors:
             return True
         else:
             return False
 
     except:
         print("Shutdown Condition Check failed")
+        return None
+
 
 
 
 
 
 def control(SNMP_Host, SNMP_Version, SNMP_Community, SNMP_Port, SNMP_Device, T_Sensor_C_1, T_Sensor_C_2, T_Sensor_C_3,
-            N_Sensors, Shutdown_Temperature, Shutdown_Message, Host_Names_Level_1):
-    try:
+            N_Sensors, Shutdown_Temperature, Host_Names_Level_1):
 
-        print('ThermalServerShutdown:1.0.0 ')
+
+    # nagios return values
+    STATE_OK = 0
+    STATE_WARNING = 1
+    STATE_CRITICAL = 2
+    STATE_UNKNOWN = 3
+    STATE_DEPENDENT = 4
+
+    NAGIOS_RETURN = STATE_UNKNOWN
+    try:
 
         # ---------------------------------------------------------------------------#
         # Establish communication to Avtech RoomAlert 32S
         AVTECH = RA32S()
-
         AVTECH.open(SNMP_VERSION=SNMP_Version, SNMP_COMMUNITY=SNMP_Community, SNMP_HOST=SNMP_Host, SNMP_PORT=SNMP_Port,
                     SNMP_DEVICE=SNMP_Device)
 
+        # Checks if connection to RoomAlert is successful
         tmp_a = AVTECH.is_connected()
-        print('Avtech Connection Established:' + str(tmp_a))
+        #print('Avtech Connection Established:' + str(tmp_a))
+        if tmp_a == False:
+            print("CRITICAL - No connection to Avtech Roomalert")
+            return STATE_CRITICAL
 
-        temp_check_passed = check_shutdown_condition(AVTECH=AVTECH, T_Sensor_C_1=T_Sensor_C_1,
+        # Check if a shutdown condition is met!
+        shutdown_required = check_shutdown_condition(AVTECH=AVTECH, T_Sensor_C_1=T_Sensor_C_1,
                                                      T_Sensor_C_2=T_Sensor_C_2, T_Sensor_C_3=T_Sensor_C_3,
                                                      N_Sensors=N_Sensors, Shutdown_Temperature=Shutdown_Temperature)
 
-        print('Shutdown Condition Check:' + str(temp_check_passed))
 
-        # ---------------------------------------------------------------------------#
-
-
-
-
-        # # ---------------------------------------------------------------------------#
-        # if not (tmp_b):  # Stopps program if connection has not been established.
-        #     print('ERROR: No Connection to MOXA E1242')
-        #     exit()
-        # if not (tmp_s):  # Stopps program if connection has not been established.
-        #     print('ERROR: No Connection to SQL Server!')
-        #     exit()
-        # # ---------------------------------------------------------------------------#
-        #
-        #
-        #
-        # # ---------------------------------------------------------------------------#
-        # try:  # Program Loop
-        #     print('Start Monitoring Program!')
-        #     time.sleep(1)
-        #     while True:
-        #         time.sleep(Cadance)
-        #
-        #         try:
-        #             #Read digital inputs for Pumps and system Fault
-        #             Sys_Fault = MOXA.read_di(0)
-        #             Pump_Status_1 = MOXA.read_di(1)
-        #             Pump_Status_2 = MOXA.read_di(2)
-        #             Pump_Status_3 = MOXA.read_di(3)
-        #
-        #             #read analog input for waterlevel
-        #             Analog_Voltage_WL = MOXA.read_ai(1)
-        #
-        #             #Convert analog voltage to waterlevel in mm [ Y=mx+b ]
-        #             m=56.67
-        #             b=24.32
-        #             Waterlevel_mm = np.float64((Analog_Voltage_WL*m) + b)
-        #
-        #         except Exception as error:
-        #             del MOXA
-        #             del SQL
-        #             print('Readout loop error!', error)
-        #
-        #
-        #
-        #
-        #         if SQL_Log:
-        #             try:
-        #                 # pack monitor information in list to hand over to SQL class to write into the database
-        #                 tmp_lines =1
-        #                 tmp_ps_list = [[0 for i in range(6)] for j in range(tmp_lines)]
-        #                 for x in range(tmp_lines):
-        #                     tmp_ps_list[x][0] = float(Waterlevel_mm/10.0)  # Water Level in cm
-        #                     tmp_ps_list[x][1] = float(0.0)  # System Temperature
-        #                     tmp_ps_list[x][2] = str(Pump_Status_1)   # Status Pump 1
-        #                     tmp_ps_list[x][3] = str(Pump_Status_2)   # Status Pump 2
-        #                     tmp_ps_list[x][4] = str(Pump_Status_3)  # Status Pump 3
-        #                     tmp_ps_list[x][5] = str(Sys_Fault)  # System Fault
-        #
-        #                 SQL.write_PS(PS_LIST=tmp_ps_list)
-        #             except Exception as error:
-        #                 print("SQL_Log error:", error)
-        #
-        #
-        #         if Display:  # Condition to print the Pump System Status and Water Level in terminal
-        #             try:
-        #
-        #                 print('System Status Fault:' + str(Sys_Fault) + '\t' + 'Pump 1 Active:' + str(Pump_Status_1) + '\t' + 'Pump 2 Active:' + str(Pump_Status_2) + '\t' + \
-        #                       'Pump 3 Active:' + str(Pump_Status_3) + '\t' + 'Water Level in [cm]:' + str(Waterlevel_mm / 10.0))
-        #             except Exception as error:
-        #                 del MOXA
-        #                 del SQL
-        #                 print('Display Values loop error!', error)
-        #
-        #
-        #
-        #
-        #
-        # except Exception as error:
-        #     print("An error occurred:", error)
-        #
-        #
-        #
-        #
-        # except KeyboardInterrupt:
-        #     try:
-        #         del MOXA
-        #         del SQL
-        #         print('interrupted!')
-        #     except:
-        #         print('Monitoring Stop!')
-        #     # ---------------------------------------------------------------------------#
+        # if shutdown required execute command on all servers
+        #print('Shutdown Condition Check:' + str(shutdown_required))
+        if not shutdown_required:
+            print("OK - No Emergency Shutdown Required")
+            return STATE_OK
+        elif shutdown_required:
+            for server in range(len(Host_Names_Level_1)):
+                execute_nrpe(Host_Names_Level_1[server], "emergency_shutdown")
+            print("CRITICAL - Emergency Shutdown Executed")
+            return STATE_CRITICAL
+        else:
+            print("UNKNOWN - Shutdown Condition Check Failed!")
+            return STATE_UNKNOWN
 
 
     except KeyboardInterrupt:
         try:
             del AVTECH
-            # del SQL
+            print("UNKNOWN - Shutdown Condition Check Failed, Keyboard Interrupt!")
+            return STATE_UNKNOWN
         except:
-            print('Monitoring Stop!')
+            print("UNKNOWN - Shutdown Condition Check Failed, Keyboard Interrupt!")
+            return STATE_UNKNOWN
 
     except Exception as tmp_exeption:
         try:
             del AVTECH
-            # del SQL
+            print("UNKNOWN - Shutdown Condition Check Failed, Exception: " + tmp_exeption)
+            return STATE_UNKNOWN
         except:
-            print('Monitoring Stop! Exception' + tmp_exeption)
+            print("UNKNOWN - Shutdown Condition Check Failed, Exception: " + tmp_exeption)
+            return STATE_UNKNOWN
