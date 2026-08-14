@@ -2,6 +2,8 @@
 
 import configparser
 import json
+import sys
+import time
 from pathlib import Path
 
 from generator_com import D300GC
@@ -21,7 +23,9 @@ def main():
 
     # Communication settings to connect to the CAT Generator
     Generator_Type = config.get('COMMUNICATION SETTINGS','Generator_Type')  # Generator Type
-    Serial_Port = config.get('COMMUNICATION SETTINGS','Serial_Port')  # Serial Port for Communication with Moxa TCP/IP module at Generator
+    NPort_IP = config.get('COMMUNICATION SETTINGS', 'NPort_IP').strip()  # Moxa NPort IP address
+    NPort_Port = config.getint('COMMUNICATION SETTINGS', 'NPort_Port')  # Moxa NPort TCP Server data port
+    NPort_URL = f"socket://{NPort_IP}:{NPort_Port}"
     Modbus_Address = config.getint('COMMUNICATION SETTINGS','Modbus_Address') # Modbus Address for Generator
     Serial_Baudrate = config.getint('COMMUNICATION SETTINGS', 'Serial_Baudrate')  # Serial baudrate for CAT communication
     Serial_Timeout = config.getfloat('COMMUNICATION SETTINGS', 'Serial_Timeout')  # Serial timeout for CAT communication
@@ -46,64 +50,60 @@ def main():
     ################################################################################################################
 
 
-    #print('Current Configuration of Control program Rev. 1.0.0 \n')
-    #print('Cadance: ' + str(Cadance))
-    #print('\n')
-
-
-    # ---------------------------------------------------------------------------#
-    # Collect complete generator readings in a list.
-    generator_data = []
-    generator = D300GC(port=Serial_Port, slave_id=Modbus_Address, baudrate=Serial_Baudrate, timeout=Serial_Timeout, request_delay=Serial_Request_Delay)
-
     try:
-        generator.open()
-        generator_data.append(generator.read_generator_data())
-    finally:
-        generator.close()
+        while True:
+            cycle_started = time.monotonic()
 
-    if Display:
-        print(json.dumps(generator_data, indent=2, sort_keys=True))
+            try:
+                # Collect complete generator readings in a list.
+                generator_data = []
+                generator = D300GC(
+                    port=NPort_URL,
+                    slave_id=Modbus_Address,
+                    baudrate=Serial_Baudrate,
+                    timeout=Serial_Timeout,
+                    request_delay=Serial_Request_Delay,
+                )
 
-    # ---------------------------------------------------------------------------#
-    if Write_SQL:
-        # Connect to MySQL, write the collected generator data, and close the
-        # connection even when an insert fails.
-        sql = MySQL_com()
-        sql_connected = False
-        try:
-            sql_connected = sql.open(HOST=SQL_Host,USER=SQL_User,PASSWORD=SQL_Password,DATABASE=SQL_Database,GENERATOR_TABLE=SQL_Table,AUTH_PLUGIN=SQL_Auth)
-            if not sql_connected:
-                raise ConnectionError("Unable to connect to the MySQL database")
+                try:
+                    generator.open()
+                    generator_data.append(generator.read_generator_data())
+                finally:
+                    generator.close()
 
-            write_successful = sql.write_generator(
-                generator_data=generator_data,
-                generator_name=Generator_Type,
-            )
-            if not write_successful:
-                raise RuntimeError("Failed to write generator data to MySQL")
-        finally:
-            if sql_connected:
-                sql.close()
+                if Display:
+                    print(json.dumps(generator_data, indent=2, sort_keys=True))
 
-    return generator_data
+                if Write_SQL:
+                    # Connect to MySQL, write the collected generator data, and
+                    # close the connection even when an insert fails.
+                    sql = MySQL_com()
+                    sql_connected = False
+                    try:
+                        sql_connected = sql.open(HOST=SQL_Host,USER=SQL_User,PASSWORD=SQL_Password,DATABASE=SQL_Database,GENERATOR_TABLE=SQL_Table,AUTH_PLUGIN=SQL_Auth)
+                        if not sql_connected:
+                            raise ConnectionError("Unable to connect to the MySQL database")
 
-#        # ---------------------------------------------------------------------------#
-#        # Connect to MySQL Server
-#        SQL= MySQL_com()
-#        SQL.open(HOST=SQL_Host,USER =SQL_User,PASSWORD=SQL_Password,DATABASE=SQL_Database,AUTH_PLUGIN=SQL_Auth)
-#        time.sleep(1)
-#        tmp_s = SQL.is_connected()
-#        print('SQL Server Connection Established:' + str(tmp_s))
-#        # ---------------------------------------------------------------------------#
+                        write_successful = sql.write_generator(
+                            generator_data=generator_data,
+                            generator_name=Generator_Type,
+                        )
+                        if not write_successful:
+                            raise RuntimeError("Failed to write generator data to MySQL")
+                    finally:
+                        if sql_connected:
+                            sql.close()
+            except Exception as error:
+                print(f"Generator recording cycle failed: {error}", file=sys.stderr)
 
-#if SQL_Log:
-#    try:
-#        SQL.write_BMS(BMS_LIST=tmp_bms_log)
-#        SQL.write_XW(XW_LIST=tmp_xw_log)
-#        SQL.write_MPPT(MPPT_LIST=tmp_mppt_log)
-#    except Exception as error:
-#        print("SQL_Log error:", error)
+            cycle_elapsed = time.monotonic() - cycle_started
+            time.sleep(max(0.0, Cadance - cycle_elapsed))
+    except KeyboardInterrupt:
+        print("Generator recording stopped.", file=sys.stderr)
+
+    return
+
+
 
 
 if __name__ == '__main__':

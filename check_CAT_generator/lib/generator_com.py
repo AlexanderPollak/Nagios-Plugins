@@ -228,7 +228,7 @@ class D300GC:
         alarm_page: int | None = None,
         request_delay: float = 0.1,
     ) -> None:
-        self._serial: serial.Serial | None = None
+        self._serial: serial.SerialBase | None = None
         self._port_name = port
         self._slave_id = self._validate_slave_id(slave_id)
         self._baudrate = baudrate
@@ -285,10 +285,10 @@ class D300GC:
         timeout: float | None = None,
         request_delay: float | None = None,
     ) -> bool:
-        """Open the Moxa-backed serial device using 115200,8,N,1 by default."""
+        """Open the Moxa TCP socket using 115200,8,N,1 by default."""
         self.initialise(port, slave_id, baudrate, timeout, request_delay)
-        self._serial = serial.Serial(
-            port=self._port_name,
+        self._serial = serial.serial_for_url(
+            self._port_name,
             baudrate=self._baudrate,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
