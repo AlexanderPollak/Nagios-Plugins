@@ -143,6 +143,9 @@ CREATE TABLE `hcro_d300gc_generator` (
 
     `communication_status`        varchar(16) DEFAULT NULL,
     `overall_status`              varchar(16) DEFAULT NULL,
+    `control_mode_code`           smallint unsigned DEFAULT NULL,
+    `control_mode`                varchar(64) DEFAULT NULL,
+    `auto_start_enabled`          boolean DEFAULT NULL,
     `engine_state_code`           smallint unsigned DEFAULT NULL,
     `engine_state`                varchar(32) DEFAULT NULL,
 
@@ -179,12 +182,249 @@ CREATE TABLE `hcro_d300gc_generator` (
 
 # Software Installation
 ```
+It is recommended to install the generator monitor in:
 
+    /usr/local/check_CAT_generator/
+
+Install the required Python modules:
+
+    python3 -m pip install -r /usr/local/check_CAT_generator/etc/check_CAT_generator_pip_req.txt
+
+Make the Nagios plugin executable:
+
+    chmod 755 /usr/local/check_CAT_generator/check_CAT_generator.py
+
+The MySQL account configured in `etc/check_CAT_generator.cfg` must have SELECT
+permission on the generator table. The Nagios user must be able to execute the
+plugin and read the configuration file. Because the configuration file contains
+database credentials, do not make it world-readable.
 ```
 
 
 # Usage:
 ```
+./check_CAT_generator.py [check] [options]
 
+Checks:
+
+    control_mode   Check the controller mode and whether automatic start is enabled.
+    autostart      Alias for control_mode.
+    fuel_level     Check that the fuel level is at or above its threshold.
+    active_alarms  Check whether the generator currently has active alarms.
+    communication Check generator communication and database-data freshness.
+    all            Run all four checks and return the most severe result.
+
+Options:
+
+    --config [path]          Configuration file. The default is
+                             etc/check_CAT_generator.cfg relative to the plugin.
+    --generator [name]       Generator name stored in MySQL. The default is
+                             Generator_Type from the configuration file.
+    --fuel-threshold [%]     Minimum acceptable fuel level. Default: 25%.
+    --max-age [seconds]      Maximum age of the newest database row. The default
+                             is twice the configured Cadance.
 ```
 
+
+# How the Nagios Plugin Works
+```
+check_CAT_generator.py reads the newest row written to MySQL by the generator
+monitor. It does not open another Modbus connection to the generator. This
+prevents the Nagios check and the monitor from competing for the Moxa serial
+connection.
+
+The plugin selects the newest row for Generator_Type from
+etc/check_CAT_generator.cfg. A different database generator name can be selected
+with --generator.
+
+The communication check uses both communication_status and the age of the newest
+database row. The monitor only writes a complete row after a successful generator
+read, so stale data also detects a stopped monitor, a failed database write, or a
+generator communication failure. By default, the maximum age is twice Cadance
+from check_CAT_generator.cfg. With the supplied Cadance of 60 seconds, the
+default maximum age is 120 seconds.
+
+Nagios return codes:
+
+    0  OK
+    1  WARNING
+    2  CRITICAL
+    3  UNKNOWN
+
+Database connection errors, missing rows, invalid values, and unavailable values
+return UNKNOWN. Disabled automatic start, fuel below its threshold, active
+alarms, disconnected communication, and stale data return CRITICAL.
+```
+
+
+# Examples:
+```
+Check that the generator is in an automatic-start control mode:
+
+    ./check_CAT_generator.py control_mode
+
+Check the fuel level using a 30% minimum threshold:
+
+    ./check_CAT_generator.py fuel_level --fuel-threshold 30
+
+Check for active alarms:
+
+    ./check_CAT_generator.py active_alarms
+
+Check communication and require a database update within 180 seconds:
+
+    ./check_CAT_generator.py communication --max-age 180
+
+Run all checks together:
+
+    ./check_CAT_generator.py all --fuel-threshold 30 --max-age 180
+```
+
+
+# Active Alarm Handling
+```
+generator_com.py reads the alarm map implemented by the controller and writes
+the active alarm name and condition to the active_alarms JSON column. The Nagios
+plugin reports active conditions only:
+
+    warning
+    shutdown
+    electrical trip
+    controlled shutdown
+    active indication
+
+Examples of supported alarm names include:
+
+    Emergency stop
+    Low oil pressure
+    High coolant temperature
+    Under speed
+    Over speed
+    Generator under frequency
+    Generator over frequency
+    Generator low voltage
+    Generator high voltage
+    Battery low voltage
+    Charge alternator failure
+    Fail to start
+    Fail to stop
+    Generator high current
+    Low fuel level
+    CAN ECU warning
+    CAN ECU shutdown
+    CAN ECU data failure
+
+The exact list depends on whether the controller exposes the legacy page 8 alarm
+map or the family-specific page 154 alarm map. Unknown implemented entries are
+reported as "Alarm N" instead of being discarded.
+
+The database stores every active alarm returned by generator_com.py. To keep the
+single Nagios output line manageable, check_CAT_generator.py displays the first
+five active alarms and then appends "+N more" when additional alarms are active.
+```
+
+
+# Example Returns:
+```
+./check_CAT_generator.py control_mode
+"OK - control mode=Auto mode, auto-start is enabled"
+
+./check_CAT_generator.py control_mode
+"CRITICAL - control mode=Manual mode, auto-start is disabled"
+
+./check_CAT_generator.py fuel_level --fuel-threshold 25
+"OK - fuel level 68% is at or above the 25% threshold | fuel_level=68%;;25;0;100"
+
+./check_CAT_generator.py active_alarms
+"OK - no active alarms | active_alarms=0;;;0;"
+
+./check_CAT_generator.py active_alarms
+"CRITICAL - 2 active alarm(s): Low oil pressure (warning), High coolant temperature (shutdown) | active_alarms=2;;;0;"
+
+./check_CAT_generator.py communication --max-age 120
+"OK - generator communication is connected and database data is fresh (42s old) | data_age=42s;;120;0;"
+
+./check_CAT_generator.py communication --max-age 120
+"CRITICAL - database data is stale (300s old, maximum 120s); last communication status=CONNECTED | data_age=300s;;120;0;"
+```
+
+
+# Nagios Core Implementation
+```
+Copy or link the executable plugin into the Nagios plugin directory. The common
+location is /usr/local/nagios/libexec, represented by $USER1$ in Nagios command
+definitions. Keep the monitor configuration in
+/usr/local/check_CAT_generator/etc/check_CAT_generator.cfg.
+
+Add these command definitions to the Nagios commands configuration:
+
+define command {
+    command_name    check_cat_generator_control_mode
+    command_line    $USER1$/check_CAT_generator.py control_mode --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg
+}
+
+define command {
+    command_name    check_cat_generator_fuel
+    command_line    $USER1$/check_CAT_generator.py fuel_level --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg --fuel-threshold $ARG1$
+}
+
+define command {
+    command_name    check_cat_generator_alarms
+    command_line    $USER1$/check_CAT_generator.py active_alarms --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg
+}
+
+define command {
+    command_name    check_cat_generator_communication
+    command_line    $USER1$/check_CAT_generator.py communication --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg --max-age $ARG1$
+}
+
+define command {
+    command_name    check_cat_generator_all
+    command_line    $USER1$/check_CAT_generator.py all --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg --fuel-threshold $ARG1$ --max-age $ARG2$
+}
+
+Add service definitions to the generator host. Replace cat-generator with the
+host_name already defined in the local Nagios configuration:
+
+define service {
+    use                     generic-service
+    host_name               cat-generator
+    service_description     CAT Generator Automatic Start
+    check_command           check_cat_generator_control_mode
+}
+
+define service {
+    use                     generic-service
+    host_name               cat-generator
+    service_description     CAT Generator Fuel Level
+    check_command           check_cat_generator_fuel!25
+}
+
+define service {
+    use                     generic-service
+    host_name               cat-generator
+    service_description     CAT Generator Active Alarms
+    check_command           check_cat_generator_alarms
+}
+
+define service {
+    use                     generic-service
+    host_name               cat-generator
+    service_description     CAT Generator Communication and Data
+    check_command           check_cat_generator_communication!120
+}
+
+Alternatively, use one combined service instead of the four services above:
+
+define service {
+    use                     generic-service
+    host_name               cat-generator
+    service_description     CAT Generator Status
+    check_command           check_cat_generator_all!25!120
+}
+
+Before reloading Nagios, run the plugin as the Nagios service account and verify
+the Nagios configuration. The exact service-account name and Nagios configuration
+path depend on the Linux distribution.
+
+```
