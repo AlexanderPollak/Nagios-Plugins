@@ -30,6 +30,8 @@ CREATE TABLE `hcro_d300gc_generator` (
   `control_mode_code` smallint unsigned DEFAULT NULL,
   `control_mode` varchar(64) DEFAULT NULL,
   `auto_start_enabled` boolean DEFAULT NULL,
+  `transfer_to_generator` boolean DEFAULT NULL,
+  `transfer_status` varchar(32) DEFAULT NULL,
   `engine_state_code` smallint unsigned DEFAULT NULL,
   `engine_state` varchar(32) DEFAULT NULL,
   `oil_pressure_kpa` smallint unsigned DEFAULT NULL,

@@ -31,6 +31,8 @@ class MySQL_com():
         "control_mode_code",
         "control_mode",
         "auto_start_enabled",
+        "transfer_to_generator",
+        "transfer_status",
         "engine_state_code",
         "engine_state",
         "oil_pressure_kpa",
@@ -211,6 +213,5 @@ class MySQL_com():
             return False
         finally:
             cursor.close()
-
 
 

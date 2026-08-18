@@ -4,7 +4,8 @@
 The plugin reads the latest row written by the generator monitor instead of
 opening another Modbus connection.  This avoids competing with the monitor for
 the Moxa serial connection and makes it possible to verify that the database is
-still receiving fresh data.
+still receiving fresh data.  The complete ``check_CAT_generator`` folder is
+designed to be installed under ``/usr/local/nagios/libexec``.
 """
 
 from __future__ import annotations
@@ -18,6 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+
+DEFAULT_INSTALL_DIRECTORY = Path("/usr/local/nagios/libexec/check_CAT_generator")
+DEFAULT_CONFIG_PATH = DEFAULT_INSTALL_DIRECTORY / "etc" / "check_CAT_generator.cfg"
 
 OK = 0
 WARNING = 1
@@ -133,6 +137,8 @@ def fetch_latest(settings: dict[str, Any], generator: str) -> dict[str, Any] | N
                 `communication_status`,
                 `control_mode`,
                 `auto_start_enabled`,
+                `transfer_to_generator`,
+                `transfer_status`,
                 `fuel_level_pct`,
                 `active_alarm_count`,
                 `active_alarms`
@@ -159,7 +165,41 @@ def check_control_mode(row: dict[str, Any]) -> Result:
     return Result(OK, f"control mode={mode}, auto-start is enabled")
 
 
-def check_fuel_level(row: dict[str, Any], threshold: float) -> Result:
+def check_transfer_status(row: dict[str, Any]) -> Result:
+    transferred = parse_boolean(row.get("transfer_to_generator"))
+    status_text = clean_output(row.get("transfer_status") or "Unknown")
+    if transferred is None:
+        return Result(UNKNOWN, f"generator transfer status is unavailable ({status_text})")
+
+    if transferred:
+        return Result(
+            WARNING,
+            "load is transferred to generator supply",
+        )
+    return Result(
+        OK,
+        "load is not transferred to generator supply",
+    )
+
+
+def check_on_emergency_power(row: dict[str, Any]) -> Result:
+    transferred = parse_boolean(row.get("transfer_to_generator"))
+    status_text = clean_output(row.get("transfer_status") or "Unknown")
+    if transferred is None:
+        return Result(UNKNOWN, f"emergency-power status is unavailable ({status_text})")
+    if transferred:
+        return Result(
+            CRITICAL,
+            "load is on emergency generator power; utility power outage indicated",
+        )
+    return Result(OK, "load is not on emergency generator power")
+
+
+def check_fuel_level(
+    row: dict[str, Any],
+    warning_threshold: float,
+    critical_threshold: float,
+) -> Result:
     raw_level = row.get("fuel_level_pct")
     if raw_level is None:
         return Result(UNKNOWN, "fuel level is unavailable")
@@ -168,16 +208,28 @@ def check_fuel_level(row: dict[str, Any], threshold: float) -> Result:
     except (TypeError, ValueError):
         return Result(UNKNOWN, f"invalid fuel level: {clean_output(raw_level)}")
 
-    perfdata = (f"fuel_level={level:g}%;;{threshold:g};0;100",)
-    if level < threshold:
+    perfdata = (
+        f"fuel_level={level:g}%;{warning_threshold:g}:;"
+        f"{critical_threshold:g}:;0;100",
+    )
+    if level < critical_threshold:
         return Result(
             CRITICAL,
-            f"fuel level {level:g}% is below the {threshold:g}% threshold",
+            f"fuel level {level:g}% is below the "
+            f"{critical_threshold:g}% critical threshold",
+            perfdata,
+        )
+    if level < warning_threshold:
+        return Result(
+            WARNING,
+            f"fuel level {level:g}% is below the "
+            f"{warning_threshold:g}% warning threshold",
             perfdata,
         )
     return Result(
         OK,
-        f"fuel level {level:g}% is at or above the {threshold:g}% threshold",
+        f"fuel level {level:g}% is at or above the "
+        f"{warning_threshold:g}% warning threshold",
         perfdata,
     )
 
@@ -297,7 +349,6 @@ def percentage(value: str) -> float:
 
 
 def parse_args() -> argparse.Namespace:
-    default_config = Path(__file__).resolve().parent / "etc" / "check_CAT_generator.cfg"
     parser = argparse.ArgumentParser(
         description="Run Nagios checks against the latest CAT generator database row."
     )
@@ -307,6 +358,9 @@ def parse_args() -> argparse.Namespace:
             "control_mode",
             "autostart",
             "fuel_level",
+            "transfer_status",
+            "transfer",
+            "on_emergency_power",
             "active_alarms",
             "communication",
             "all",
@@ -316,18 +370,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=default_config,
-        help=f"configuration file (default: {default_config})",
+        default=DEFAULT_CONFIG_PATH,
+        help=f"configuration file (default: {DEFAULT_CONFIG_PATH})",
     )
     parser.add_argument(
         "--generator",
         help="generator name stored in the database (default: Generator_Type from config)",
     )
     parser.add_argument(
+        "--fuel-warning",
+        type=percentage,
+        default=70.0,
+        help="fuel warning threshold percentage (default: 70)",
+    )
+    parser.add_argument(
+        "--fuel-critical",
         "--fuel-threshold",
+        dest="fuel_critical",
         type=percentage,
         default=25.0,
-        help="minimum acceptable fuel percentage (default: 25)",
+        help="fuel critical threshold percentage (default: 25)",
     )
     parser.add_argument(
         "--max-age",
@@ -340,6 +402,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
+        if args.fuel_critical >= args.fuel_warning:
+            raise ValueError(
+                "fuel critical threshold must be lower than the warning threshold"
+            )
         settings = load_settings(args.config)
         generator = args.generator or settings["generator"]
         if not generator:
@@ -352,7 +418,14 @@ def main() -> int:
             checks: dict[str, Callable[[], Result]] = {
                 "control_mode": lambda: check_control_mode(row),
                 "autostart": lambda: check_control_mode(row),
-                "fuel_level": lambda: check_fuel_level(row, args.fuel_threshold),
+                "fuel_level": lambda: check_fuel_level(
+                    row,
+                    args.fuel_warning,
+                    args.fuel_critical,
+                ),
+                "transfer_status": lambda: check_transfer_status(row),
+                "transfer": lambda: check_transfer_status(row),
+                "on_emergency_power": lambda: check_on_emergency_power(row),
                 "active_alarms": lambda: check_active_alarms(row),
                 "communication": lambda: check_communication(row, max_age),
             }
@@ -361,6 +434,7 @@ def main() -> int:
                     [
                         ("control_mode", checks["control_mode"]()),
                         ("fuel_level", checks["fuel_level"]()),
+                        ("on_emergency_power", checks["on_emergency_power"]()),
                         ("active_alarms", checks["active_alarms"]()),
                         ("communication", checks["communication"]()),
                     ]

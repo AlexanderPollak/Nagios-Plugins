@@ -46,6 +46,8 @@ READOUT_TESTS = (
     ReadoutTest("read_control_mode_code", "Control mode code", minimum=0, maximum=7),
     ReadoutTest("read_control_mode", "Control mode", allow_none=False),
     ReadoutTest("read_auto_start_enabled", "Automatic start enabled"),
+    ReadoutTest("read_transfer_to_generator", "Transferred to generator"),
+    ReadoutTest("read_transfer_status", "Transfer status", allow_none=False),
     ReadoutTest("read_engine_state_code", "Engine state code", minimum=0, maximum=15),
     ReadoutTest("read_engine_state", "Engine state", allow_none=False),
     ReadoutTest("read_oil_pressure", "Oil pressure", "kPa", 0, 10000),

@@ -1,10 +1,17 @@
 # Check CAT Generator
-Nagios script to check Catapiller Generator and log data into a mySQL database.: tested with D300 GC
+
+Monitor a Caterpillar D300 GC generator, store its readings in MySQL for
+Grafana, and run Nagios checks against the latest database record.
 
 
 # Requirements:
 ```
 Python 3.10 or newer.
+
+Install the packages pinned in `etc/check_CAT_generator_pip_req.txt`:
+
+    pyserial==3.5
+    mysql-connector-python==26.7.0
 
 Network access to the Moxa NPort IA5150A IP address and TCP port.
 
@@ -14,7 +21,8 @@ Generator Modbus slave ID set to 10.
 
 Software must send Modbus RTU frames with CRC over the Moxa TCP connection.
 
-Register values are signed 16-bit integers unless otherwise documented.
+Register signedness, width, and scaling follow the GenComm register map. The
+implemented readings include signed and unsigned 16-bit and 32-bit values.
 
 Apply the correct register offset; displayed register 1026 normally corresponds to protocol address 1025.
 
@@ -23,17 +31,27 @@ Only one application should access the Moxa serial connection at a time.
 
 # Supported Devices
 ```
-Catapiller Generator
+Caterpillar Generator
 		1. D300 GC
 
 ```
 
 # Communication
 ```
-Generator:The communication is established using Modbus RTU over a TCP connection provided by the Moxa NPort IA5150A.
-The Moxa is connected via Ethernet to the control computer and acts as a transparent media converter to the generator’s RS-485 interface.
-The serial connection operates at 115200,8,n,1, and the generator uses Modbus slave ID 10. The Python software must send complete Modbus RTU frames,
-including the CRC, through the Moxa TCP port to read the generator’s signed 16-bit registers.
+Communication uses Modbus RTU frames over a TCP connection provided by the
+Moxa NPort IA5150A. The Moxa is connected via Ethernet to the monitoring host
+and acts as a transparent converter to the generator controller's RS-485
+interface.
+
+The RS-485 side operates at 115200,8,N,1, and the generator uses Modbus slave
+ID 10. The monitor sends complete Modbus RTU frames, including the CRC, through
+the Moxa TCP data port.
+
+This is TCP/IP transport, but it is not native Modbus TCP with an MBAP header.
+`generator_com.py` currently uses pyserial's `serial_for_url()` with a
+`socket://host:port` URL as its TCP transport, so `pyserial` remains a runtime
+dependency. The standalone `test_transfer_tcp.py` diagnostic uses Python's
+built-in socket library directly.
 ```
 
 
@@ -41,61 +59,41 @@ including the CRC, through the Moxa TCP port to read the generator’s signed 16
 # CLASS Implementation
 
 
-## generator_check: D300GC
+## generator_com: D300GC
 ```
 This module contains classes and functions to communicate with the D300GC generator controller through the Moxa NPort IA5150A.
 
-The class in this module ("D300GC") reads the generator’s Modbus registers and provides Nagios-compatible checks. Each check returns an OK, WARNING, CRITICAL, or UNKNOWN state.
+The `D300GC` class reads and decodes the generator's GenComm registers. Nagios
+checks are implemented separately in `check_CAT_generator.py` and read the
+latest stored MySQL row instead of opening another generator connection.
 
 List of monitored values:
 1. Communication status
-2. Generator operating state
-3. Engine speed
-4. Oil pressure
-5. Coolant temperature
-6. Starter-battery voltage
+2. Overall controller status
+3. Control mode and automatic-start state
+4. Engine operating state and speed
+5. Oil pressure and temperatures
+6. Starter-battery and charge-alternator voltage
 7. Fuel level
-8. Generator output voltage
-9. Generator output frequency
-10. Generator output current
-11. Engine operating hours
-12. Active alarms and shutdowns
+8. Generator voltage, frequency, current, power, and power factor
+9. Engine run time, number of starts, and generated energy
+10. Active alarms and shutdowns
+11. Transfer to generator status
 
-List of Nagios checks:
-1. check_communication
-2. check_operating_state
-3. check_engine_speed
-4. check_oil_pressure
-5. check_coolant_temperature
-6. check_battery_voltage
-7. check_fuel_level
-8. check_output_voltage
-9. check_output_frequency
-10. check_output_current
-11. check_active_alarms
-12. check_generator_status
-
-List of functions:
+Key public functions:
     initialise()
     open()
     close()
+    reconnect()
     is_connected()
+    register_address()
     read_register()
     read_generator_data()
     read_active_alarms()
-    check_communication()
-    check_operating_state()
-    check_engine_speed()
-    check_oil_pressure()
-    check_coolant_temperature()
-    check_battery_voltage()
-    check_fuel_level()
-    check_output_voltage()
-    check_output_frequency()
-    check_output_current()
-    check_active_alarms()
-    check_generator_status()
-    log_generator_data()
+    read_transfer_to_generator()
+    read_transfer_status()
+
+Individual `read_*` methods are also provided for every stored measurement.
 ```
 
 
@@ -105,7 +103,7 @@ List of functions:
 ```
 This module contains classes and functions to write D300GC generator data into a MySQL database so that it can later be displayed and monitored using Grafana.
 
-The class in this module ("mysql_com") manages the database connection and populates the generator-specific tables with timestamped measurements,
+The `MySQL_com` class manages the database connection and populates the generator-specific table with timestamped measurements,
 operating states, and alarm information.
 
 List of stored values:
@@ -121,12 +119,13 @@ List of stored values:
 10. Engine operating hours
 11. Active alarms and shutdowns
 12. Communication status
+13. Transfer to generator status
 
 List of functions:
     open()
     close()
     is_connected()
-    write_D300GC()
+    write_generator()
 ```
 
 # MySQL Database Tables
@@ -146,6 +145,8 @@ CREATE TABLE `hcro_d300gc_generator` (
     `control_mode_code`           smallint unsigned DEFAULT NULL,
     `control_mode`                varchar(64) DEFAULT NULL,
     `auto_start_enabled`          boolean DEFAULT NULL,
+    `transfer_to_generator`       boolean DEFAULT NULL,
+    `transfer_status`             varchar(32) DEFAULT NULL,
     `engine_state_code`           smallint unsigned DEFAULT NULL,
     `engine_state`                varchar(32) DEFAULT NULL,
 
@@ -177,27 +178,46 @@ CREATE TABLE `hcro_d300gc_generator` (
     PRIMARY KEY (`ts`, `generator`),
     KEY `idx_generator_ts` (`generator`, `ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+For an existing table, apply the included migration once before restarting the
+monitor:
+
+    mysql -u root -p grafanadata < etc/add_transfer_status_columns.sql
 ```
 
 
 # Software Installation
 ```
-It is recommended to install the generator monitor in:
+Install the complete check_CAT_generator folder in the Nagios plugin directory:
 
-    /usr/local/check_CAT_generator/
+    /usr/local/nagios/libexec/check_CAT_generator/
 
 Install the required Python modules:
 
-    python3 -m pip install -r /usr/local/check_CAT_generator/etc/check_CAT_generator_pip_req.txt
+    python3 -m pip install -r /usr/local/nagios/libexec/check_CAT_generator/etc/check_CAT_generator_pip_req.txt
 
 Make the Nagios plugin executable:
 
-    chmod 755 /usr/local/check_CAT_generator/check_CAT_generator.py
+    chmod 755 /usr/local/nagios/libexec/check_CAT_generator/check_CAT_generator.py
 
-The MySQL account configured in `etc/check_CAT_generator.cfg` must have SELECT
-permission on the generator table. The Nagios user must be able to execute the
-plugin and read the configuration file. Because the configuration file contains
-database credentials, do not make it world-readable.
+Make the monitor wrapper executable:
+
+    chmod 755 /usr/local/nagios/libexec/check_CAT_generator/monitor_CAT_generator.sh
+
+The wrapper currently starts `./lib/main.py` using a relative path, so start it
+from the installation directory:
+
+    cd /usr/local/nagios/libexec/check_CAT_generator
+    ./monitor_CAT_generator.sh
+
+The monitor's MySQL account needs INSERT permission on the generator table. The
+Nagios check needs SELECT permission. If both use the same configured account,
+that account needs both permissions. Applying schema migrations requires a
+separate account with ALTER permission.
+
+The Nagios user must be able to execute the plugin and read the configuration
+file. Because the configuration file contains database credentials, do not make
+it world-readable.
 ```
 
 
@@ -209,18 +229,23 @@ Checks:
 
     control_mode   Check the controller mode and whether automatic start is enabled.
     autostart      Alias for control_mode.
-    fuel_level     Check that the fuel level is at or above its threshold.
+    fuel_level     Check the fuel level against warning and critical thresholds.
+    transfer_status Check whether the load is transferred to generator supply.
+    transfer       Alias for transfer_status.
+    on_emergency_power Return CRITICAL when the load is on generator supply.
     active_alarms  Check whether the generator currently has active alarms.
     communication Check generator communication and database-data freshness.
-    all            Run all four checks and return the most severe result.
+    all            Run all five checks and return the most severe result.
 
 Options:
 
     --config [path]          Configuration file. The default is
-                             etc/check_CAT_generator.cfg relative to the plugin.
+                             /usr/local/nagios/libexec/check_CAT_generator/etc/
+                             check_CAT_generator.cfg.
     --generator [name]       Generator name stored in MySQL. The default is
                              Generator_Type from the configuration file.
-    --fuel-threshold [%]     Minimum acceptable fuel level. Default: 25%.
+    --fuel-warning [%]       Fuel warning threshold. Default: 70%.
+    --fuel-critical [%]      Fuel critical threshold. Default: 25%.
     --max-age [seconds]      Maximum age of the newest database row. The default
                              is twice the configured Cadance.
 ```
@@ -230,12 +255,14 @@ Options:
 ```
 check_CAT_generator.py reads the newest row written to MySQL by the generator
 monitor. It does not open another Modbus connection to the generator. This
-prevents the Nagios check and the monitor from competing for the Moxa serial
-connection.
+prevents the Nagios check and the monitor from competing for the generator's
+Moxa TCP/RTU connection.
 
 The plugin selects the newest row for Generator_Type from
-etc/check_CAT_generator.cfg. A different database generator name can be selected
-with --generator.
+/usr/local/nagios/libexec/check_CAT_generator/etc/check_CAT_generator.cfg. A
+different database generator name can be selected with --generator. The
+--config option can select a different configuration during development or
+testing.
 
 The communication check uses both communication_status and the age of the newest
 database row. The monitor only writes a complete row after a successful generator
@@ -252,8 +279,11 @@ Nagios return codes:
     3  UNKNOWN
 
 Database connection errors, missing rows, invalid values, and unavailable values
-return UNKNOWN. Disabled automatic start, fuel below its threshold, active
-alarms, disconnected communication, and stale data return CRITICAL.
+return UNKNOWN. Disabled automatic start, fuel below 25%, active alarms,
+emergency-generator operation, disconnected communication, and stale data
+return CRITICAL. Fuel below 70% but not below 25% returns WARNING. The standalone
+`transfer_status` check returns WARNING when the load is transferred; the
+`on_emergency_power` check and the combined `all` check return CRITICAL.
 ```
 
 
@@ -263,9 +293,13 @@ Check that the generator is in an automatic-start control mode:
 
     ./check_CAT_generator.py control_mode
 
-Check the fuel level using a 30% minimum threshold:
+Check the fuel level using the default 70% warning and 25% critical thresholds:
 
-    ./check_CAT_generator.py fuel_level --fuel-threshold 30
+    ./check_CAT_generator.py fuel_level
+
+Check the fuel level using custom thresholds:
+
+    ./check_CAT_generator.py fuel_level --fuel-warning 60 --fuel-critical 20
 
 Check for active alarms:
 
@@ -277,7 +311,15 @@ Check communication and require a database update within 180 seconds:
 
 Run all checks together:
 
-    ./check_CAT_generator.py all --fuel-threshold 30 --max-age 180
+    ./check_CAT_generator.py all --fuel-warning 70 --fuel-critical 25 --max-age 180
+
+Check whether the load has transferred to generator supply:
+
+    ./check_CAT_generator.py transfer_status
+
+Alert when the load is running on emergency generator power:
+
+    ./check_CAT_generator.py on_emergency_power
 ```
 
 
@@ -332,8 +374,26 @@ five active alarms and then appends "+N more" when additional alarms are active.
 ./check_CAT_generator.py control_mode
 "CRITICAL - control mode=Manual mode, auto-start is disabled"
 
-./check_CAT_generator.py fuel_level --fuel-threshold 25
-"OK - fuel level 68% is at or above the 25% threshold | fuel_level=68%;;25;0;100"
+./check_CAT_generator.py fuel_level
+"OK - fuel level 75% is at or above the 70% warning threshold | fuel_level=75%;70:;25:;0;100"
+
+./check_CAT_generator.py fuel_level
+"WARNING - fuel level 68% is below the 70% warning threshold | fuel_level=68%;70:;25:;0;100"
+
+./check_CAT_generator.py fuel_level
+"CRITICAL - fuel level 12% is below the 25% critical threshold | fuel_level=12%;70:;25:;0;100"
+
+./check_CAT_generator.py transfer_status
+"OK - load is not transferred to generator supply"
+
+./check_CAT_generator.py transfer_status
+"WARNING - load is transferred to generator supply"
+
+./check_CAT_generator.py on_emergency_power
+"OK - load is not on emergency generator power"
+
+./check_CAT_generator.py on_emergency_power
+"CRITICAL - load is on emergency generator power; utility power outage indicated"
 
 ./check_CAT_generator.py active_alarms
 "OK - no active alarms | active_alarms=0;;;0;"
@@ -351,36 +411,54 @@ five active alarms and then appends "+N more" when additional alarms are active.
 
 # Nagios Core Implementation
 ```
-Copy or link the executable plugin into the Nagios plugin directory. The common
-location is /usr/local/nagios/libexec, represented by $USER1$ in Nagios command
-definitions. Keep the monitor configuration in
-/usr/local/check_CAT_generator/etc/check_CAT_generator.cfg.
+Install the complete folder at:
+
+    /usr/local/nagios/libexec/check_CAT_generator/
+
+For Nagios Core installations under /usr/local/nagios, the
+/usr/local/nagios/libexec directory is normally represented by $USER1$ in
+Nagios command definitions. The resulting layout is:
+
+    /usr/local/nagios/libexec/check_CAT_generator/check_CAT_generator.py
+    /usr/local/nagios/libexec/check_CAT_generator/monitor_CAT_generator.sh
+    /usr/local/nagios/libexec/check_CAT_generator/etc/check_CAT_generator.cfg
+    /usr/local/nagios/libexec/check_CAT_generator/lib/
 
 Add these command definitions to the Nagios commands configuration:
 
 define command {
     command_name    check_cat_generator_control_mode
-    command_line    $USER1$/check_CAT_generator.py control_mode --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg
+    command_line    $USER1$/check_CAT_generator/check_CAT_generator.py control_mode
 }
 
 define command {
     command_name    check_cat_generator_fuel
-    command_line    $USER1$/check_CAT_generator.py fuel_level --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg --fuel-threshold $ARG1$
+    command_line    $USER1$/check_CAT_generator/check_CAT_generator.py fuel_level --fuel-warning $ARG1$ --fuel-critical $ARG2$
 }
 
 define command {
     command_name    check_cat_generator_alarms
-    command_line    $USER1$/check_CAT_generator.py active_alarms --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg
+    command_line    $USER1$/check_CAT_generator/check_CAT_generator.py active_alarms
+}
+
+define command {
+    command_name    check_cat_generator_transfer
+    command_line    $USER1$/check_CAT_generator/check_CAT_generator.py transfer_status
+}
+
+define command {
+    command_name    check_cat_generator_emergency_power
+    command_line    $USER1$/check_CAT_generator/check_CAT_generator.py on_emergency_power
 }
 
 define command {
     command_name    check_cat_generator_communication
-    command_line    $USER1$/check_CAT_generator.py communication --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg --max-age $ARG1$
+    command_line    $USER1$/check_CAT_generator/check_CAT_generator.py communication --max-age $ARG1$
 }
 
 define command {
     command_name    check_cat_generator_all
-    command_line    $USER1$/check_CAT_generator.py all --config /usr/local/check_CAT_generator/etc/check_CAT_generator.cfg --fuel-threshold $ARG1$ --max-age $ARG2$
+    command_line    $USER1$/check_CAT_generator/check_CAT_generator.py all --fuel-warning $ARG1$ --fuel-critical $ARG2$ --max-age $ARG3$
 }
 
 Add service definitions to the generator host. Replace cat-generator with the
@@ -397,7 +475,7 @@ define service {
     use                     generic-service
     host_name               cat-generator
     service_description     CAT Generator Fuel Level
-    check_command           check_cat_generator_fuel!25
+    check_command           check_cat_generator_fuel!70!25
 }
 
 define service {
@@ -410,17 +488,37 @@ define service {
 define service {
     use                     generic-service
     host_name               cat-generator
+    service_description     CAT Generator Load Transfer
+    check_command           check_cat_generator_transfer
+}
+
+define service {
+    use                     generic-service
+    host_name               cat-generator
+    service_description     CAT Generator Emergency Power
+    check_command           check_cat_generator_emergency_power
+}
+
+The load-transfer service gives a WARNING and the emergency-power service gives
+a CRITICAL for the same transfer state. Use only the emergency-power service if
+you do not want both alerts.
+
+define service {
+    use                     generic-service
+    host_name               cat-generator
     service_description     CAT Generator Communication and Data
     check_command           check_cat_generator_communication!120
 }
 
-Alternatively, use one combined service instead of the four services above:
+Alternatively, use one combined service instead of the separate services. The
+combined check includes control mode, fuel level, emergency power, active
+alarms, and communication/data freshness:
 
 define service {
     use                     generic-service
     host_name               cat-generator
     service_description     CAT Generator Status
-    check_command           check_cat_generator_all!25!120
+    check_command           check_cat_generator_all!70!25!120
 }
 
 Before reloading Nagios, run the plugin as the Nagios service account and verify

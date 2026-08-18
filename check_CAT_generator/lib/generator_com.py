@@ -66,6 +66,11 @@ class D300GC:
     PAGE_ACCUMULATED_INSTRUMENTATION = 7
     PAGE_ALARMS = 8
     PAGE_NAMED_ALARMS = 154
+    PAGE_OUTPUT_STATUS = 190
+
+    # D300GC controller allocation: Page 190, offset 19 is the live bus-breaker
+    # LED state. A value of 1 means the load has transferred to generator supply.
+    TRANSFER_STATUS_OFFSET = 19
 
     ENGINE_STATE_NAMES = {
         0: "Engine stopped",
@@ -509,6 +514,31 @@ class D300GC:
             return None
         return code in self.AUTO_START_CONTROL_MODES
 
+    # Page 190 - live output status --------------------------------------------
+
+    def read_transfer_to_generator(self) -> bool | None:
+        """Return whether the load is transferred to generator supply."""
+        value = self._read_value(
+            self.PAGE_OUTPUT_STATUS,
+            self.TRANSFER_STATUS_OFFSET,
+        )
+        if value is None:
+            return None
+        if value not in (0, 1):
+            raise GeneratorProtocolError(
+                f"Invalid generator transfer status value: {value}"
+            )
+        return bool(value)
+
+    def read_transfer_status(self) -> str:
+        """Return a readable generator transfer status."""
+        transferred = self.read_transfer_to_generator()
+        if transferred is None:
+            return "Unknown"
+        if transferred:
+            return "Transferred to generator"
+        return "Not transferred to generator"
+
     # Page 4 - basic instrumentation -------------------------------------------
 
     def read_oil_pressure(self) -> int | None:
@@ -707,6 +737,7 @@ class D300GC:
 
         control_mode_code = self.read_control_mode_code()
         engine_state_code = self.read_engine_state_code()
+        transfer_to_generator = self.read_transfer_to_generator()
         active_alarms = self.read_active_alarms()
         return {
             "communication_status": communication_status,
@@ -723,6 +754,16 @@ class D300GC:
                 None
                 if control_mode_code is None
                 else control_mode_code in self.AUTO_START_CONTROL_MODES
+            ),
+            "transfer_to_generator": transfer_to_generator,
+            "transfer_status": (
+                "Unknown"
+                if transfer_to_generator is None
+                else (
+                    "Transferred to generator"
+                    if transfer_to_generator
+                    else "Not transferred to generator"
+                )
             ),
             "engine_state_code": engine_state_code,
             "engine_state": (

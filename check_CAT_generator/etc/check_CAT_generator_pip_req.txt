@@ -1,7 +1,3 @@
-pyModbusTCP==0.1.8
+# Runtime dependencies used by generator_com.py and mysql_write.py.
 pyserial==3.5
-configparser==6.0.0
-ipython==8.14.0
-mysql-connector==2.2.9
-numpy==1.25.2
-pyparsing==2.4.7
+mysql-connector-python==26.7.0
