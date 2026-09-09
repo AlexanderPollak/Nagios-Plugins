@@ -68,9 +68,10 @@ class D300GC:
     PAGE_NAMED_ALARMS = 154
     PAGE_OUTPUT_STATUS = 190
 
-    # D300GC controller allocation: Page 190, offset 19 is the live bus-breaker
-    # LED state. A value of 1 means the load has transferred to generator supply.
-    TRANSFER_STATUS_OFFSET = 19
+    # Caterpillar annunciator row 14 is "EPS Supplying Load". The two enabled
+    # 2548 modules expose rows 1-16 on Page 190; row 14 is module 1 output F,
+    # at offset 126. A value of 1 means emergency power is supplying the load.
+    TRANSFER_STATUS_OFFSET = 126
 
     ENGINE_STATE_NAMES = {
         0: "Engine stopped",
